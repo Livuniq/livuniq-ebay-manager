@@ -333,25 +333,35 @@ export async function DELETE(request: Request) {
     const account = accounts.find((a) => a.id === accountId) || accounts[0];
 
     if (all) {
-      const allListings = getListings(accountId);
+      const scope = searchParams.get('scope') || 'all';
+      const targetAccId = searchParams.get('accountId');
+      
+      // If scope is 'all', target all listings across all accounts. If 'current', filter by targetAccId.
+      const listingsToRemove = (scope === 'current' && targetAccId)
+        ? getListings(targetAccId)
+        : getListings();
+
       const endedResults: { itemId?: string; success: boolean; message: string }[] = [];
 
-      if (endOnEbay && account) {
-        for (const l of allListings) {
+      if (endOnEbay) {
+        for (const l of listingsToRemove) {
           if (l.ebayListingId) {
-            const endRes = await endLiveEbayListing(account, l.ebayListingId);
-            endedResults.push({ itemId: l.ebayListingId, ...endRes });
+            const acc = accounts.find((a) => a.id === l.accountId) || account;
+            if (acc) {
+              const endRes = await endLiveEbayListing(acc, l.ebayListingId);
+              endedResults.push({ itemId: l.ebayListingId, ...endRes });
+            }
           }
         }
       }
 
-      const clearedCount = clearAllListings(accountId);
+      const clearedCount = clearAllListings(scope === 'current' && targetAccId ? targetAccId : undefined);
       return NextResponse.json({
         success: true,
         clearedCount,
         endedOnEbayCount: endedResults.filter((r) => r.success).length,
         endedResults,
-        message: `Successfully ended and removed all ${clearedCount} listings from eBay and Dashboard!`,
+        message: `Successfully removed ${clearedCount} listings from Dashboard${endedResults.length > 0 ? ` and ended ${endedResults.filter(r => r.success).length} on live eBay` : ''}!`,
       });
     }
 

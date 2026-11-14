@@ -43,10 +43,11 @@ import CreateListingModal from '@/components/CreateListingModal';
 import EditListingModal from '@/components/EditListingModal';
 import BulkListingModal from '@/components/BulkListingModal';
 import MasterSpecificsMapping from '@/components/MasterSpecificsMapping';
-import { FileSpreadsheet, SlidersHorizontal } from 'lucide-react';
+import MasterHtmlTemplates from '@/components/MasterHtmlTemplates';
+import { FileSpreadsheet, SlidersHorizontal, FileCode } from 'lucide-react';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'overview' | 'listings' | 'orders' | 'messages' | 'stores' | 'settings' | 'specifics-mapping'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'listings' | 'orders' | 'messages' | 'stores' | 'settings' | 'specifics-mapping' | 'templates-master'>('overview');
 
   // Multi-Account state
   const [accounts, setAccounts] = useState<ConnectedAccount[]>([]);
@@ -126,6 +127,12 @@ export default function Home() {
     timestamp: string;
   } | null>(null);
   const [userAuthTokenInput, setUserAuthTokenInput] = useState('');
+
+  // Remove All Listings State
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [clearingListings, setClearingListings] = useState(false);
+  const [clearEndOnEbay, setClearEndOnEbay] = useState(true);
+  const [clearScope, setClearScope] = useState<'all' | 'current'>('all');
 
   // Fetch Accounts list
   const fetchAccountsAndData = async (targetAccId?: string) => {
@@ -304,6 +311,54 @@ export default function Home() {
       console.error('Failed to update listing', err);
     } finally {
       setTimeout(() => setQuickSavingId(null), 1200);
+    }
+  };
+
+  // Delete an individual listing completely
+  const handleDeleteSingleListing = async (id: string) => {
+    if (!confirm('Are you sure you want to permanently delete this listing? (If active on eBay, it will be ended)')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/ebay/listings?id=${id}&endOnEbay=true&accountId=${activeAccountId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setListings((prev) => prev.filter((l) => l.id !== id));
+      } else {
+        alert(data.error || 'Failed to delete listing');
+      }
+    } catch (err: any) {
+      alert(`Error deleting listing: ${err.message}`);
+    }
+  };
+
+  // Clear/Remove all listings everywhere
+  const handleClearAllListings = async () => {
+    setClearingListings(true);
+    try {
+      const res = await fetch(
+        `/api/ebay/listings?all=true&scope=${clearScope}&accountId=${activeAccountId}&endOnEbay=${clearEndOnEbay}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json();
+      if (data.success) {
+        if (clearScope === 'all') {
+          setListings([]);
+        } else {
+          setListings((prev) => prev.filter((l) => l.accountId !== activeAccountId));
+        }
+        setShowClearAllModal(false);
+        alert(data.message || 'All listings removed successfully from everywhere!');
+        await fetchAccountsAndData();
+      } else {
+        alert(data.error || 'Failed to clear listings');
+      }
+    } catch (err: any) {
+      alert(`Error clearing listings: ${err.message}`);
+    } finally {
+      setClearingListings(false);
     }
   };
 
@@ -693,6 +748,24 @@ export default function Home() {
               </div>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
                 Master
+              </span>
+            </button>
+
+            {/* MASTER HTML DESCRIPTION TEMPLATES TAB */}
+            <button
+              onClick={() => setActiveTab('templates-master')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition cursor-pointer ${
+                activeTab === 'templates-master'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+              }`}
+            >
+              <div className="flex items-center space-x-3">
+                <FileCode className="w-4 h-4 text-purple-400" />
+                <span>HTML Templates Master</span>
+              </div>
+              <span className="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded font-bold">
+                Design
               </span>
             </button>
 
@@ -1108,6 +1181,15 @@ export default function Home() {
                     <Plus className="w-3.5 h-3.5" />
                     <span>New Listing</span>
                   </button>
+
+                  <button
+                    onClick={() => setShowClearAllModal(true)}
+                    className="flex items-center space-x-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer"
+                    title="Remove all listings from everywhere (Dashboard and live eBay store)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Remove All Listings</span>
+                  </button>
                 </div>
               </div>
 
@@ -1265,6 +1347,14 @@ export default function Home() {
                                 className="text-[11px] text-slate-500 hover:text-rose-600 font-medium cursor-pointer"
                               >
                                 {item.quantity === 0 ? 'Restock (5)' : 'End Listing'}
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteSingleListing(item.id)}
+                                className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold cursor-pointer px-1 py-0.5 rounded hover:bg-rose-50 transition"
+                                title="Permanently delete from Dashboard and end on eBay"
+                              >
+                                Delete
                               </button>
 
                               {pushNotice && pushNotice.id === item.id && (
@@ -1749,6 +1839,11 @@ export default function Home() {
           {activeTab === 'specifics-mapping' && (
             <MasterSpecificsMapping />
           )}
+
+          {/* TAB 8: MASTER HTML DESCRIPTION TEMPLATES */}
+          {activeTab === 'templates-master' && (
+            <MasterHtmlTemplates />
+          )}
         </div>
       </main>
 
@@ -2065,6 +2160,95 @@ export default function Home() {
                   OK, Great
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: REMOVE ALL LISTINGS EVERYWHERE */}
+      {showClearAllModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in duration-200 space-y-4">
+            <div className="flex items-center gap-3 text-rose-600">
+              <span className="p-2.5 bg-rose-50 text-rose-600 rounded-xl">
+                <Trash2 className="w-6 h-6" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Remove All Listings Everywhere?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Permanent removal from Dashboard and eBay
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-800 leading-relaxed">
+              ⚠️ <strong>Warning:</strong> Ye action sare listings ko database aur eBay live store se permanently remove / end kar dega. Is action ko undo nahi kiya ja sakta.
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Scope of Removal:
+                </label>
+                <select
+                  value={clearScope}
+                  onChange={(e) => setClearScope(e.target.value as 'all' | 'current')}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-rose-500 cursor-pointer"
+                >
+                  <option value="all">
+                    🌍 Entire System (All Connected Stores & Accounts) - {listings.length} listings
+                  </option>
+                  <option value="current">
+                    🏪 Current Store Only ({activeAccount?.storeName || 'Active Store'})
+                  </option>
+                </select>
+              </div>
+
+              <label className="flex items-start gap-2 text-xs font-medium text-slate-700 cursor-pointer bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <input
+                  type="checkbox"
+                  checked={clearEndOnEbay}
+                  onChange={(e) => setClearEndOnEbay(e.target.checked)}
+                  className="rounded text-rose-600 focus:ring-rose-500 mt-0.5 cursor-pointer"
+                />
+                <span>
+                  <strong>Also End Live Listings on eBay (EndItem)</strong>
+                  <span className="text-[11px] text-slate-500 block">
+                    Active listings on eBay will be ended immediately so buyers cannot purchase them.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowClearAllModal(false)}
+                disabled={clearingListings}
+                className="px-4 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAllListings}
+                disabled={clearingListings}
+                className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold shadow-xs transition disabled:opacity-50 cursor-pointer"
+              >
+                {clearingListings ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Removing Everything...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Remove All Everywhere</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
