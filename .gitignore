@@ -23,6 +23,11 @@
 # misc
 .DS_Store
 *.pem
+.data/
+item-raw.xml
+dump-item.js
+check-live.js
+public/uploads/
 
 # debug
 npm-debug.log*
