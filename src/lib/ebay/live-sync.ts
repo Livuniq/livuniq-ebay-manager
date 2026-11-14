@@ -670,6 +670,7 @@ export async function addLiveEbayListing(
     returnPolicyName?: string;
     paymentPolicyId?: string;
     paymentPolicyName?: string;
+    scheduledTime?: string;
   }
 ): Promise<{ success: boolean; itemId?: string; message: string }> {
   const store = getStore();
@@ -769,6 +770,7 @@ export async function addLiveEbayListing(
     <DispatchTimeMax>10</DispatchTimeMax>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
+    ${listing.scheduledTime ? `<ScheduleTime>${new Date(listing.scheduledTime).toISOString()}</ScheduleTime>` : ''}
     <PostalCode>16701</PostalCode>
     ${(() => {
       const norm = normalizePolicies({

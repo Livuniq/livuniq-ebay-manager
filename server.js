@@ -66,4 +66,37 @@ app.prepare().then(() => {
   server.listen(3000, () => {
     console.log('> Ready on http://localhost:3000 AND https://localhost:3000');
   });
+
+  // Auto-Scheduler: Check for scheduled listings due for publishing every 60s
+  setInterval(() => {
+    try {
+      const stateFile = path.join(__dirname, '.data', 'ebay_state.json');
+      if (fs.existsSync(stateFile)) {
+        const raw = fs.readFileSync(stateFile, 'utf8');
+        const state = JSON.parse(raw);
+        const nowIso = new Date().toISOString();
+        const dueListings = (state.listings || []).filter(
+          (l) => l.scheduledTime && l.scheduledTime <= nowIso && (l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId)
+        );
+        if (dueListings.length > 0) {
+          console.log(`[Auto-Scheduler] ${dueListings.length} scheduled listings reached go-live time. Triggering auto-publish...`);
+          const req = http.request(
+            {
+              hostname: 'localhost',
+              port: 3000,
+              path: '/api/ebay/listings/publish-drafts',
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            },
+            () => {}
+          );
+          req.on('error', () => {});
+          req.write(JSON.stringify({}));
+          req.end();
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, 60000);
 });

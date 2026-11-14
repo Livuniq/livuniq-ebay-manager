@@ -362,6 +362,41 @@ export default function Home() {
     }
   };
 
+  // Publish All Drafts in Bulk to live eBay
+  const [publishingDrafts, setPublishingDrafts] = useState(false);
+
+  const handlePublishAllDrafts = async () => {
+    const drafts = listings.filter((l) => l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId);
+    if (drafts.length === 0) {
+      alert('Koi unpublished draft nahi mila. Saare listings pehle se eBay par live hain!');
+      return;
+    }
+
+    if (!confirm(`Kya aap sabhi ${drafts.length} drafts ko eBay store (${activeAccount?.storeName || 'Active Store'}) par LIVE publish karna chahte hain?`)) {
+      return;
+    }
+
+    setPublishingDrafts(true);
+    try {
+      const res = await fetch('/api/ebay/listings/publish-drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountId: activeAccountId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message || `Successfully published ${data.publishedCount} drafts to live eBay!`);
+        await fetchAccountsAndData();
+      } else {
+        alert(data.error || 'Failed to publish drafts');
+      }
+    } catch (err: any) {
+      alert(`Error publishing drafts: ${err.message}`);
+    } finally {
+      setPublishingDrafts(false);
+    }
+  };
+
   // Push an individual listing to live eBay store
   const handlePushListingToEbay = async (item: EbayListing) => {
     try {
@@ -1166,6 +1201,25 @@ export default function Home() {
 
                   <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block" />
 
+                  {/* Publish All Drafts Button */}
+                  {listings.some((l) => l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId) && (
+                    <button
+                      onClick={handlePublishAllDrafts}
+                      disabled={publishingDrafts}
+                      className="flex items-center space-x-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
+                      title="Publish all local drafts and unpublished changes live to eBay store"
+                    >
+                      {publishingDrafts ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <UploadCloud className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        Publish All Drafts ({listings.filter((l) => l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId).length})
+                      </span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => setShowBulkModal(true)}
                     className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
@@ -1299,6 +1353,17 @@ export default function Home() {
                                 >
                                   {item.status === 'ACTIVE' ? 'Live on eBay' : item.status === 'DRAFT' ? 'Draft' : 'Out of Stock'}
                                 </span>
+                                {item.scheduledTime && (
+                                  <span
+                                    className="text-[10px] text-purple-800 font-bold bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
+                                    title={`Scheduled Go-Live: ${new Date(item.scheduledTime).toLocaleString()}`}
+                                  >
+                                    <Clock className="w-3 h-3 text-purple-600" />
+                                    <span>
+                                      {new Date(item.scheduledTime).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </span>
+                                )}
                                 {item.hasUnpublishedChanges && (
                                   <span className="text-[10px] text-amber-800 font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>

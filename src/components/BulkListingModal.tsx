@@ -25,6 +25,8 @@ import {
   Trash2,
   HelpCircle,
   Video,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
@@ -212,6 +214,11 @@ export default function BulkListingModal({
 
   const [masterSpecifics, setMasterSpecifics] = useState<SpecificMappingRule[]>(DEFAULT_SPECIFICS_MAPPINGS);
   const [categoryProfiles, setCategoryProfiles] = useState<MasterCategoryProfile[]>(DEFAULT_CATEGORY_PROFILES);
+
+  // Publish Mode: 'DRAFT' (Local Review), 'SCHEDULE' (Time Par Live), 'NOW' (Direct Live)
+  const [publishMode, setPublishMode] = useState<'DRAFT' | 'SCHEDULE' | 'NOW'>('DRAFT');
+  const [scheduledDateTime, setScheduledDateTime] = useState<string>('');
+  const [scheduleDirectOnEbay, setScheduleDirectOnEbay] = useState<boolean>(true);
 
   useEffect(() => {
     fetch('/api/ebay/templates')
@@ -953,10 +960,17 @@ export default function BulkListingModal({
     setParsedRows(updated);
   };
 
-  // 6. Execute Bulk Import / Publish
-  const handleExecuteBulk = async (publishToEbay: boolean) => {
+  // 6. Execute Bulk Import / Publish / Schedule
+  const handleExecuteBulk = async (modeParam?: 'DRAFT' | 'SCHEDULE' | 'NOW') => {
+    const targetMode = modeParam || publishMode;
+
     if (parsedRows.length === 0) {
       setErrorMessage('No listings available to process');
+      return;
+    }
+
+    if (targetMode === 'SCHEDULE' && !scheduledDateTime) {
+      setErrorMessage('Please select a scheduled Date & Time for items to go live');
       return;
     }
 
@@ -969,7 +983,13 @@ export default function BulkListingModal({
 
     setIsProcessing(true);
     setProgressPercent(10);
-    setProgressMsg(publishToEbay ? 'Connecting to eBay servers...' : 'Saving drafts locally...');
+    if (targetMode === 'NOW') {
+      setProgressMsg('Connecting to eBay servers and publishing live...');
+    } else if (targetMode === 'SCHEDULE') {
+      setProgressMsg(`Scheduling listings for ${new Date(scheduledDateTime).toLocaleString()}...`);
+    } else {
+      setProgressMsg('Saving listings as drafts locally in dashboard...');
+    }
     setErrorMessage('');
     setSuccessMessage('');
 
@@ -1034,7 +1054,10 @@ export default function BulkListingModal({
         body: JSON.stringify({
           accountId: activeAccount?.id,
           items: itemsPayload,
-          publishToEbay,
+          publishMode: targetMode,
+          publishToEbay: targetMode === 'NOW' || (targetMode === 'SCHEDULE' && scheduleDirectOnEbay),
+          scheduledTime: targetMode === 'SCHEDULE' ? new Date(scheduledDateTime).toISOString() : undefined,
+          scheduleDirectOnEbay: targetMode === 'SCHEDULE' && scheduleDirectOnEbay,
         }),
       });
 
@@ -1046,13 +1069,17 @@ export default function BulkListingModal({
           .map((r: any) => r.listing)
           .filter(Boolean);
 
-        if (publishToEbay) {
+        if (targetMode === 'NOW') {
           setSuccessMessage(
             `Bulk Publish Complete! Successfully published ${data.successCount} of ${data.total} listings live to eBay!`
           );
+        } else if (targetMode === 'SCHEDULE') {
+          setSuccessMessage(
+            `Scheduled Successfully! ${data.total} listings are scheduled to go live on ${new Date(scheduledDateTime).toLocaleString()}.`
+          );
         } else {
           setSuccessMessage(
-            `Bulk Drafts Saved! Successfully imported ${data.total} listings into your dashboard!`
+            `Bulk Drafts Saved! Successfully imported ${data.total} listings into dashboard for manual review.`
           );
         }
 
@@ -1900,33 +1927,189 @@ export default function BulkListingModal({
                 </div>
               )}
 
-              {/* Action Buttons Box */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div>
-                  <h4 className="font-bold text-slate-900 text-xs">Ready to Import {parsedRows.length} Items</h4>
-                  <p className="text-slate-500 text-[11px] mt-0.5">
-                    Save as Drafts in dashboard to review later, or directly publish all items live to your eBay store.
+              {/* PUBLISH MODE SELECTION (DRAFT / SCHEDULE / LIVE NOW) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
+                <div className="space-y-0.5">
+                  <h4 className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-blue-600" />
+                    Publishing Mode & Scheduling
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Aap decide kar sakte hain ki items direct live na ho kar draft ban kar save hon, scheduled time par auto-live hon, ya abhi live publish hon.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Mode 1: Drafts */}
+                  <label
+                    className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between space-y-2 ${
+                      publishMode === 'DRAFT'
+                        ? 'bg-blue-50/70 border-blue-500 ring-2 ring-blue-500/20'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
+                        1. Save as Drafts (Manual Live)
+                      </span>
+                      <input
+                        type="radio"
+                        name="publishMode"
+                        value="DRAFT"
+                        checked={publishMode === 'DRAFT'}
+                        onChange={() => setPublishMode('DRAFT')}
+                        className="text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Dashboard me draft save hoga. eBay par direct live nahi hoga. Baad me jab chaho ek-ek ya bulk me manually live kar sakte ho.
+                    </p>
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100/70 px-2 py-0.5 rounded-md w-fit">
+                      Safest / Recommended
+                    </span>
+                  </label>
+
+                  {/* Mode 2: Scheduled */}
+                  <label
+                    className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between space-y-2 ${
+                      publishMode === 'SCHEDULE'
+                        ? 'bg-purple-50/70 border-purple-500 ring-2 ring-purple-500/20'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-purple-600" />
+                        2. Schedule Go-Live Time
+                      </span>
+                      <input
+                        type="radio"
+                        name="publishMode"
+                        value="SCHEDULE"
+                        checked={publishMode === 'SCHEDULE'}
+                        onChange={() => setPublishMode('SCHEDULE')}
+                        className="text-purple-600 focus:ring-purple-500 cursor-pointer"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Future date aur time set karein. Us time par listings automatically eBay live store par publish ho jayengi.
+                    </p>
+                    <span className="text-[10px] font-bold text-purple-700 bg-purple-100/70 px-2 py-0.5 rounded-md w-fit">
+                      Auto-Pilot Schedule
+                    </span>
+                  </label>
+
+                  {/* Mode 3: Immediate Live */}
+                  <label
+                    className={`p-3.5 rounded-xl border cursor-pointer transition flex flex-col justify-between space-y-2 ${
+                      publishMode === 'NOW'
+                        ? 'bg-emerald-50/70 border-emerald-500 ring-2 ring-emerald-500/20'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <span className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        3. Publish Live Now
+                      </span>
+                      <input
+                        type="radio"
+                        name="publishMode"
+                        value="NOW"
+                        checked={publishMode === 'NOW'}
+                        onChange={() => setPublishMode('NOW')}
+                        className="text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Excel ke saare listings abhi turant live eBay store par publish ho jayenge.
+                    </p>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-md w-fit">
+                      Direct Live
+                    </span>
+                  </label>
+                </div>
+
+                {/* If Mode 2 (SCHEDULE) selected: show Date & Time Picker */}
+                {publishMode === 'SCHEDULE' && (
+                  <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-2 animate-in fade-in duration-200">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label className="text-xs font-bold text-purple-900 block flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                          Select Scheduled Date & Time for eBay Live:
+                        </label>
+                        <span className="text-[11px] text-purple-700">
+                          Set the date and time when items will go live on eBay.
+                        </span>
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={scheduledDateTime}
+                        min={new Date().toISOString().slice(0, 16)}
+                        onChange={(e) => setScheduledDateTime(e.target.value)}
+                        className="px-3 py-2 border border-purple-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-2xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons Box */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div>
+                  <h4 className="font-bold text-slate-900 text-xs">Ready to Process {parsedRows.length} Items</h4>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    {publishMode === 'SCHEDULE' && scheduledDateTime
+                      ? `Items will be scheduled to go live on ${new Date(scheduledDateTime).toLocaleString()}`
+                      : publishMode === 'NOW'
+                      ? 'Items will be uploaded directly to live eBay store'
+                      : 'Items will be stored safely as local drafts in dashboard'}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5">
                   <button
                     type="button"
-                    onClick={() => handleExecuteBulk(false)}
+                    onClick={() => handleExecuteBulk('DRAFT')}
                     disabled={isProcessing}
-                    className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-xl font-bold text-xs shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-800 rounded-xl font-bold text-xs shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
                   >
-                    Save as Drafts (Local)
+                    Save as Drafts
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExecuteBulk(true)}
-                    disabled={isProcessing}
-                    className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    Bulk Publish Live to eBay
-                  </button>
+
+                  {publishMode === 'SCHEDULE' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteBulk('SCHEDULE')}
+                      disabled={isProcessing || !scheduledDateTime}
+                      className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl font-bold text-xs shadow-sm transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                    >
+                      <Clock className="w-4 h-4" />
+                      Schedule {parsedRows.length} Items for Live
+                    </button>
+                  ) : publishMode === 'NOW' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteBulk('NOW')}
+                      disabled={isProcessing}
+                      className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Publish {parsedRows.length} Items Live Now
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteBulk('DRAFT')}
+                      disabled={isProcessing}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      Save {parsedRows.length} Drafts (Review Later)
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

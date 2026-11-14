@@ -51,6 +51,8 @@ export interface EbayListing {
   status: 'ACTIVE' | 'OUT_OF_STOCK' | 'ENDED' | 'DRAFT';
   ebayListingId?: string;
   hasUnpublishedChanges?: boolean;
+  scheduledTime?: string;
+  publishMode?: 'NOW' | 'DRAFT' | 'SCHEDULE';
   lastSyncedWithEbayAt?: string;
   lastUpdated: string;
 }

@@ -31,7 +31,7 @@ export interface BulkImportItemPayload {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { items, accountId, publishToEbay } = body;
+    const { items, accountId, publishToEbay, publishMode = (publishToEbay ? 'NOW' : 'DRAFT'), scheduledTime } = body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ success: false, error: 'No items provided for bulk import' }, { status: 400 });
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const targetAccountId = accountId || getActiveAccountId();
     const account = store.accounts.find((a) => a.id === targetAccountId) || store.accounts[0];
 
-    const shouldPublishToEbay = Boolean(publishToEbay);
+    const shouldPublishToEbay = publishMode === 'NOW' || (publishMode === 'SCHEDULE' && body.scheduleDirectOnEbay);
 
     if (shouldPublishToEbay && account) {
       await ensureFreshAccessToken(account);
@@ -99,6 +99,7 @@ export async function POST(request: Request) {
             returnPolicyName: item.returnPolicyName,
             paymentPolicyId: item.paymentPolicyId,
             paymentPolicyName: item.paymentPolicyName,
+            scheduledTime: scheduledTime,
           });
 
           if (addRes.success) {
@@ -144,6 +145,8 @@ export async function POST(request: Request) {
         status: shouldPublishToEbay ? (ebayLiveStatus === 'LIVE_CREATED' ? 'ACTIVE' : 'DRAFT') : 'DRAFT',
         ebayListingId: liveItemId,
         hasUnpublishedChanges: !shouldPublishToEbay || ebayLiveStatus !== 'LIVE_CREATED',
+        scheduledTime: scheduledTime,
+        publishMode: publishMode as any,
         lastSyncedWithEbayAt: ebayLiveStatus === 'LIVE_CREATED' ? new Date().toISOString() : undefined,
       });
 
