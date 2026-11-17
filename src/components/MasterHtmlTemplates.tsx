@@ -119,7 +119,18 @@ const AVAILABLE_TAGS = [
   { tag: '{STORE_NAME}', label: 'Store Name', desc: 'Seller Store Brand' },
 ];
 
-export default function MasterHtmlTemplates() {
+interface MasterHtmlTemplatesProps {
+  activeAccountId?: string;
+  accounts?: Array<{ id: string; storeName: string; ebayUsername: string; marketplace: string }>;
+  onSwitchAccount?: (accountId: string) => void;
+}
+
+export default function MasterHtmlTemplates({
+  activeAccountId,
+  accounts = [],
+  onSwitchAccount,
+}: MasterHtmlTemplatesProps = {}) {
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(activeAccountId || (accounts[0]?.id || ''));
   const [templates, setTemplates] = useState<DescriptionTemplate[]>([...DEFAULT_TEMPLATES]);
   const [categoryProfiles, setCategoryProfiles] = useState<MasterCategoryProfile[]>([...DEFAULT_CATEGORY_PROFILES]);
   const [loading, setLoading] = useState(true);
@@ -152,6 +163,12 @@ export default function MasterHtmlTemplates() {
   // Status feedback toast
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  useEffect(() => {
+    if (activeAccountId && activeAccountId !== selectedAccountId) {
+      setSelectedAccountId(activeAccountId);
+    }
+  }, [activeAccountId]);
+
   // Debounced dry run check for Find & Replace
   useEffect(() => {
     if (subTab !== 'find-replace' || !frFromText.trim()) {
@@ -164,6 +181,7 @@ export default function MasterHtmlTemplates() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            accountId: selectedAccountId,
             fromText: frFromText,
             toText: frToText,
             caseSensitive: frCaseSensitive,
@@ -179,17 +197,17 @@ export default function MasterHtmlTemplates() {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [subTab, frFromText, frToText, frCaseSensitive]);
+  }, [subTab, frFromText, frToText, frCaseSensitive, selectedAccountId]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load Templates & Category Profiles
-  const loadData = async () => {
+  // Load Templates & Category Profiles for selected store
+  const loadData = async (accId = selectedAccountId) => {
     setLoading(true);
     try {
       const [tplRes, specRes] = await Promise.all([
-        fetch('/api/ebay/templates'),
-        fetch('/api/ebay/specifics-mapping'),
+        fetch(`/api/ebay/templates?accountId=${accId || ''}`),
+        fetch(`/api/ebay/specifics-mapping?accountId=${accId || ''}`),
       ]);
 
       const [tplData, specData] = await Promise.all([
@@ -199,6 +217,8 @@ export default function MasterHtmlTemplates() {
 
       if (tplData.success && tplData.templates && tplData.templates.length > 0) {
         setTemplates(tplData.templates);
+      } else {
+        setTemplates([...DEFAULT_TEMPLATES]);
       }
       if (specData.success && specData.profiles && specData.profiles.length > 0) {
         setCategoryProfiles(specData.profiles);
@@ -211,8 +231,8 @@ export default function MasterHtmlTemplates() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    loadData(selectedAccountId);
+  }, [selectedAccountId]);
 
   const showToast = (text: string, type: 'success' | 'error' = 'success') => {
     setToastMsg({ text, type });
@@ -295,6 +315,7 @@ export default function MasterHtmlTemplates() {
     setSaveStatus('Saving template...');
     try {
       const payload: any = {
+        accountId: selectedAccountId,
         name: formName.trim(),
         description: formDescription.trim(),
         html: formHtml,
@@ -328,15 +349,15 @@ export default function MasterHtmlTemplates() {
         return p;
       });
 
-      // Save updated category profiles to API
+      // Save updated category profiles to API for this store
       await fetch('/api/ebay/specifics-mapping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profiles: updatedProfiles }),
+        body: JSON.stringify({ accountId: selectedAccountId, profiles: updatedProfiles }),
       });
 
       setCategoryProfiles(updatedProfiles);
-      await loadData();
+      await loadData(selectedAccountId);
 
       setEditorOpen(false);
       showToast(editingTemplateId ? 'Template updated successfully!' : 'New template created successfully!');
@@ -350,7 +371,7 @@ export default function MasterHtmlTemplates() {
   // Delete Template
   const handleDeleteTemplate = async (id: string) => {
     try {
-      const res = await fetch(`/api/ebay/templates?id=${id}`, {
+      const res = await fetch(`/api/ebay/templates?id=${id}&accountId=${selectedAccountId || ''}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -365,7 +386,7 @@ export default function MasterHtmlTemplates() {
         await fetch('/api/ebay/specifics-mapping', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profiles: updatedProfiles }),
+          body: JSON.stringify({ accountId: selectedAccountId, profiles: updatedProfiles }),
         });
 
         setCategoryProfiles(updatedProfiles);
@@ -391,7 +412,7 @@ export default function MasterHtmlTemplates() {
       const res = await fetch('/api/ebay/specifics-mapping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profiles: updated }),
+        body: JSON.stringify({ accountId: selectedAccountId, profiles: updated }),
       });
       const data = await res.json();
       if (data.success) {
@@ -421,6 +442,46 @@ export default function MasterHtmlTemplates() {
         >
           <CheckCircle className="w-4 h-4" />
           <span>{toastMsg.text}</span>
+        </div>
+      )}
+
+      {/* Store Context Switcher */}
+      {accounts.length > 0 && (
+        <div className="bg-slate-900 text-white p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-sm border border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-lg">
+              🎨
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Configuring Templates For:</span>
+                <span className="text-xs font-bold text-purple-400 bg-purple-950/60 px-2.5 py-0.5 rounded-full border border-purple-700/50">
+                  {accounts.find((a) => a.id === selectedAccountId)?.storeName || 'Active Store'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Har eBay store ke liye HTML templates, custom designs aur category template mappings alag-alag save hoti hain.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-300 font-semibold">Switch Store:</label>
+            <select
+              value={selectedAccountId}
+              onChange={(e) => {
+                setSelectedAccountId(e.target.value);
+                if (onSwitchAccount) onSwitchAccount(e.target.value);
+              }}
+              className="bg-slate-800 hover:bg-slate-700/80 text-white text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+            >
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.storeName} ({acc.marketplace})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
@@ -798,6 +859,7 @@ export default function MasterHtmlTemplates() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                      accountId: selectedAccountId,
                       fromText: frFromText,
                       toText: frToText,
                       caseSensitive: frCaseSensitive,

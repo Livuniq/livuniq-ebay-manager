@@ -57,7 +57,18 @@ const EXCEL_COLUMNS_CATALOG = [
   'STYLE',
 ];
 
-export default function MasterSpecificsMapping() {
+interface MasterSpecificsMappingProps {
+  activeAccountId?: string;
+  accounts?: Array<{ id: string; storeName: string; ebayUsername: string; marketplace: string }>;
+  onSwitchAccount?: (accountId: string) => void;
+}
+
+export default function MasterSpecificsMapping({
+  activeAccountId,
+  accounts = [],
+  onSwitchAccount,
+}: MasterSpecificsMappingProps = {}) {
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(activeAccountId || (accounts[0]?.id || ''));
   const [profiles, setProfiles] = useState<MasterCategoryProfile[]>(DEFAULT_CATEGORY_PROFILES);
   const [activeProfileId, setActiveProfileId] = useState<string>('engagement_ring');
   const [templates, setTemplates] = useState<DescriptionTemplate[]>([...DEFAULT_TEMPLATES]);
@@ -82,16 +93,26 @@ export default function MasterSpecificsMapping() {
   const [newCatEbayId, setNewCatEbayId] = useState('261975');
   const [newCatAliases, setNewCatAliases] = useState('');
 
-  // Fetch profiles and templates on mount
   useEffect(() => {
+    if (activeAccountId && activeAccountId !== selectedAccountId) {
+      setSelectedAccountId(activeAccountId);
+    }
+  }, [activeAccountId]);
+
+  // Fetch profiles and templates whenever selectedAccountId changes
+  useEffect(() => {
+    setLoading(true);
     Promise.all([
-      fetch('/api/ebay/specifics-mapping').then((r) => r.json()),
-      fetch('/api/ebay/templates').then((r) => r.json()).catch(() => ({ templates: [] })),
+      fetch(`/api/ebay/specifics-mapping?accountId=${selectedAccountId || ''}`).then((r) => r.json()),
+      fetch(`/api/ebay/templates?accountId=${selectedAccountId || ''}`).then((r) => r.json()).catch(() => ({ templates: [] })),
     ])
       .then(([mapData, tplData]) => {
         if (mapData.success && mapData.profiles && Array.isArray(mapData.profiles) && mapData.profiles.length > 0) {
           setProfiles(mapData.profiles);
           setActiveProfileId(mapData.profiles[0].id);
+        } else {
+          setProfiles(DEFAULT_CATEGORY_PROFILES);
+          setActiveProfileId('engagement_ring');
         }
         if (tplData.success && tplData.templates && Array.isArray(tplData.templates) && tplData.templates.length > 0) {
           setTemplates(tplData.templates);
@@ -99,7 +120,7 @@ export default function MasterSpecificsMapping() {
       })
       .catch((err) => console.error('Failed to load specifics mappings:', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedAccountId]);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId) || profiles[0];
 
@@ -278,11 +299,11 @@ export default function MasterSpecificsMapping() {
       const res = await fetch('/api/ebay/specifics-mapping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profiles }),
+        body: JSON.stringify({ accountId: selectedAccountId, profiles }),
       });
       const data = await res.json();
       if (data.success) {
-        setSaveStatus('✅ All Category Item Specifics & Templates saved successfully!');
+        setSaveStatus('✅ All Category Item Specifics & Templates saved successfully for this store!');
         setTimeout(() => setSaveStatus(''), 4500);
       } else {
         alert(data.error || 'Failed to save mappings');
@@ -332,6 +353,46 @@ export default function MasterSpecificsMapping() {
 
   return (
     <div className="space-y-6">
+      {/* Store Context Switcher */}
+      {accounts.length > 0 && (
+        <div className="bg-slate-900 text-white p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-sm border border-slate-800">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-lg">
+              🏪
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Configuring Store Profile:</span>
+                <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-700/50">
+                  {accounts.find((a) => a.id === selectedAccountId)?.storeName || 'Active Store'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Is eBay store ke liye item specifics rules aur category mappings completely independent save hongi.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-slate-300 font-semibold">Switch Store:</label>
+            <select
+              value={selectedAccountId}
+              onChange={(e) => {
+                setSelectedAccountId(e.target.value);
+                if (onSwitchAccount) onSwitchAccount(e.target.value);
+              }}
+              className="bg-slate-800 hover:bg-slate-700/80 text-white text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+            >
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.storeName} ({acc.marketplace})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* Top Header Card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">

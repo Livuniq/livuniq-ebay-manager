@@ -383,9 +383,22 @@ export function markThreadAsRead(threadId: string): boolean {
   return true;
 }
 
-// Description HTML Template operations
-export function getTemplates(): DescriptionTemplate[] {
+// Description HTML Template operations (per-account or global)
+export function getTemplates(accountId?: string): DescriptionTemplate[] {
   const store = getStore();
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+
+  if (account) {
+    if (!account.templates || account.templates.length === 0) {
+      account.templates = store.templates && store.templates.length > 0
+        ? JSON.parse(JSON.stringify(store.templates))
+        : [...DEFAULT_TEMPLATES];
+      saveStore(store);
+    }
+    return (account.templates || []) as DescriptionTemplate[];
+  }
+
   if (!store.templates || store.templates.length === 0) {
     store.templates = [...DEFAULT_TEMPLATES];
     saveStore(store);
@@ -393,19 +406,32 @@ export function getTemplates(): DescriptionTemplate[] {
   return store.templates;
 }
 
-export function saveTemplate(tpl: Partial<DescriptionTemplate> & { name: string; html: string }): DescriptionTemplate {
+export function saveTemplate(
+  tpl: Partial<DescriptionTemplate> & { name: string; html: string },
+  accountId?: string
+): DescriptionTemplate {
   const store = getStore();
-  if (!store.templates) store.templates = [...DEFAULT_TEMPLATES];
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+
+  let targetList: DescriptionTemplate[] = store.templates || [];
+  if (account) {
+    if (!account.templates) account.templates = [...DEFAULT_TEMPLATES];
+    targetList = account.templates as DescriptionTemplate[];
+  } else {
+    if (!store.templates) store.templates = [...DEFAULT_TEMPLATES];
+    targetList = store.templates;
+  }
 
   if (tpl.id) {
-    const idx = store.templates.findIndex((t) => t.id === tpl.id);
+    const idx = targetList.findIndex((t) => t.id === tpl.id);
     if (idx !== -1) {
-      store.templates[idx] = {
-        ...store.templates[idx],
+      targetList[idx] = {
+        ...targetList[idx],
         ...tpl,
       };
       saveStore(store);
-      return store.templates[idx];
+      return targetList[idx];
     }
   }
 
@@ -417,53 +443,86 @@ export function saveTemplate(tpl: Partial<DescriptionTemplate> & { name: string;
     createdAt: new Date().toISOString(),
   };
 
-  store.templates.push(newTpl);
+  targetList.push(newTpl);
   saveStore(store);
   return newTpl;
 }
 
-export function deleteTemplate(id: string): boolean {
+export function deleteTemplate(id: string, accountId?: string): boolean {
   const store = getStore();
-  if (!store.templates) return false;
-  const initialLen = store.templates.length;
-  store.templates = store.templates.filter((t) => t.id !== id);
-  if (store.templates.length !== initialLen) {
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+
+  let targetList: DescriptionTemplate[] | undefined =
+    (account?.templates as DescriptionTemplate[]) || store.templates;
+
+  if (!targetList) return false;
+  const initialLen = targetList.length;
+  const filtered = targetList.filter((t) => t.id !== id);
+  if (filtered.length !== initialLen) {
+    if (account) {
+      account.templates = filtered;
+    } else {
+      store.templates = filtered;
+    }
     saveStore(store);
     return true;
   }
   return false;
 }
 
-// Master Item Specifics Mappings (Static & Dynamic rules)
-export function getSpecificsMappings(): SpecificMappingRule[] {
+// Master Item Specifics Mappings (Static & Dynamic rules per account)
+export function getSpecificsMappings(accountId?: string): SpecificMappingRule[] {
   const store = getStore();
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+  if (account && account.specificsMapping && account.specificsMapping.length > 0) {
+    return account.specificsMapping;
+  }
   if (store.specificsMapping && Array.isArray(store.specificsMapping) && store.specificsMapping.length > 0) {
     return store.specificsMapping;
   }
   return DEFAULT_SPECIFICS_MAPPINGS;
 }
 
-export function saveSpecificsMappings(rules: SpecificMappingRule[]): SpecificMappingRule[] {
+export function saveSpecificsMappings(rules: SpecificMappingRule[], accountId?: string): SpecificMappingRule[] {
   const store = getStore();
-  store.specificsMapping = rules;
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+  if (account) {
+    account.specificsMapping = rules;
+  } else {
+    store.specificsMapping = rules;
+  }
   saveStore(store);
-  return store.specificsMapping;
+  return rules;
 }
 
-// Master Category Profiles (Item Specifics & Template mappings per category)
-export function getCategoryProfiles(): MasterCategoryProfile[] {
+// Master Category Profiles (Item Specifics & Template mappings per category per account)
+export function getCategoryProfiles(accountId?: string): MasterCategoryProfile[] {
   const store = getStore();
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+  if (account && account.categoryProfiles && account.categoryProfiles.length > 0) {
+    return account.categoryProfiles;
+  }
   if (store.categoryProfiles && Array.isArray(store.categoryProfiles) && store.categoryProfiles.length > 0) {
     return store.categoryProfiles;
   }
   return DEFAULT_CATEGORY_PROFILES;
 }
 
-export function saveCategoryProfiles(profiles: MasterCategoryProfile[]): MasterCategoryProfile[] {
+export function saveCategoryProfiles(profiles: MasterCategoryProfile[], accountId?: string): MasterCategoryProfile[] {
   const store = getStore();
-  store.categoryProfiles = profiles;
+  const targetId = accountId || store.activeAccountId;
+  const account = store.accounts.find((a) => a.id === targetId);
+  if (account) {
+    account.categoryProfiles = profiles;
+  } else {
+    store.categoryProfiles = profiles;
+  }
   saveStore(store);
-  return store.categoryProfiles;
+  return profiles;
 }
 
 // Master Description Find & Replace (From - To Editor)

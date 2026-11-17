@@ -18,6 +18,9 @@ export interface ConnectedAccount {
   returnPolicyName?: string;
   paymentPolicyId?: string;
   paymentPolicyName?: string;
+  templates?: any[];
+  specificsMapping?: any[];
+  categoryProfiles?: any[];
 }
 
 export interface EbayListing {

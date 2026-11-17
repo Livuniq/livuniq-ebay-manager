@@ -2236,12 +2236,20 @@ export default function Home() {
 
           {/* TAB 7: MASTER ITEM SPECIFICS MAPPING (STATIC & DYNAMIC) */}
           {activeTab === 'specifics-mapping' && (
-            <MasterSpecificsMapping />
+            <MasterSpecificsMapping
+              activeAccountId={activeAccountId}
+              accounts={accounts}
+              onSwitchAccount={handleSwitchAccount}
+            />
           )}
 
           {/* TAB 8: MASTER HTML DESCRIPTION TEMPLATES */}
           {activeTab === 'templates-master' && (
-            <MasterHtmlTemplates />
+            <MasterHtmlTemplates
+              activeAccountId={activeAccountId}
+              accounts={accounts}
+              onSwitchAccount={handleSwitchAccount}
+            />
           )}
         </div>
       </main>

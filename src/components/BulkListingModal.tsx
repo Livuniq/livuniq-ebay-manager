@@ -221,7 +221,7 @@ export default function BulkListingModal({
   const [scheduleDirectOnEbay, setScheduleDirectOnEbay] = useState<boolean>(true);
 
   useEffect(() => {
-    fetch('/api/ebay/templates')
+    fetch(`/api/ebay/templates?accountId=${activeAccount?.id || ''}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.success && d.templates && d.templates.length > 0) {
@@ -235,7 +235,7 @@ export default function BulkListingModal({
       })
       .catch((err) => console.error('Failed to load templates:', err));
 
-    fetch('/api/ebay/specifics-mapping')
+    fetch(`/api/ebay/specifics-mapping?accountId=${activeAccount?.id || ''}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.success) {

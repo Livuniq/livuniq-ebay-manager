@@ -5,6 +5,8 @@ import {
   getCategoryProfiles,
   saveCategoryProfiles,
   ensureStoreAsync,
+  getStore,
+  saveStoreAsync,
 } from '@/lib/ebay/server-store';
 import {
   DEFAULT_SPECIFICS_MAPPINGS,
@@ -13,11 +15,13 @@ import {
   type MasterCategoryProfile,
 } from '@/lib/ebay/specifics-rules';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     await ensureStoreAsync();
-    const rules = getSpecificsMappings();
-    const profiles = getCategoryProfiles();
+    const { searchParams } = new URL(request.url);
+    const accountId = searchParams.get('accountId') || undefined;
+    const rules = getSpecificsMappings(accountId);
+    const profiles = getCategoryProfiles(accountId);
     return NextResponse.json({
       success: true,
       rules,
@@ -37,22 +41,25 @@ export async function POST(request: Request) {
   try {
     await ensureStoreAsync();
     const body = await request.json();
+    const accountId = body.accountId || undefined;
 
     let savedProfiles: MasterCategoryProfile[] | undefined = undefined;
     let savedRules: SpecificMappingRule[] | undefined = undefined;
 
     if (body.profiles && Array.isArray(body.profiles)) {
-      savedProfiles = saveCategoryProfiles(body.profiles);
+      savedProfiles = saveCategoryProfiles(body.profiles, accountId);
     }
 
     if (body.rules && Array.isArray(body.rules)) {
-      savedRules = saveSpecificsMappings(body.rules);
+      savedRules = saveSpecificsMappings(body.rules, accountId);
     }
+
+    await saveStoreAsync(getStore());
 
     return NextResponse.json({
       success: true,
-      profiles: savedProfiles || getCategoryProfiles(),
-      rules: savedRules || getSpecificsMappings(),
+      profiles: savedProfiles || getCategoryProfiles(accountId),
+      rules: savedRules || getSpecificsMappings(accountId),
       message: 'Master Specifics & Category mappings saved successfully!',
     });
   } catch (err) {
