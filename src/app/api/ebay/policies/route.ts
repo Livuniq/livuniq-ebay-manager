@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getStore, getActiveAccountId } from '@/lib/ebay/server-store';
+import { getStore, getActiveAccountId, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
 import { ensureFreshAccessToken } from '@/lib/ebay/live-sync';
-import fs from 'fs';
-import path from 'path';
 
 export interface EbayBusinessPolicyItem {
   id: string;
@@ -14,6 +12,7 @@ export interface EbayBusinessPolicyItem {
 
 export async function GET(request: Request) {
   try {
+    await ensureStoreAsync();
     const { searchParams } = new URL(request.url);
     const store = getStore();
     const accountId = searchParams.get('accountId') || getActiveAccountId();
@@ -116,6 +115,7 @@ export async function GET(request: Request) {
 // Update default store policies
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
     const store = getStore();
     const accountId = body.accountId || getActiveAccountId();
@@ -132,9 +132,7 @@ export async function POST(request: Request) {
     if (body.paymentPolicyId !== undefined) targetAccount.paymentPolicyId = body.paymentPolicyId;
     if (body.paymentPolicyName !== undefined) targetAccount.paymentPolicyName = body.paymentPolicyName;
 
-    const DATA_DIR = path.join(process.cwd(), '.data');
-    const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
-    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+    await saveStoreAsync(store);
 
     return NextResponse.json({
       success: true,

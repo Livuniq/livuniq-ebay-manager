@@ -6,6 +6,8 @@ import {
   connectNewAccount,
   disconnectAccount,
   ensureStoreAsync,
+  getStore,
+  saveStoreAsync,
 } from '@/lib/ebay/server-store';
 
 export async function GET() {
@@ -52,6 +54,19 @@ export async function POST(request: Request) {
       });
     }
 
+    // Action 3: Rename store display name or update username
+    if (body.action === 'rename' || body.action === 'update') {
+      const store = getStore();
+      const target = store.accounts.find((a) => a.id === body.accountId);
+      if (target) {
+        if (body.storeName) target.storeName = body.storeName.trim();
+        if (body.ebayUsername) target.ebayUsername = body.ebayUsername.trim();
+        await saveStoreAsync(store);
+        return NextResponse.json({ success: true, account: target });
+      }
+      return NextResponse.json({ success: false, error: 'Account not found' }, { status: 404 });
+    }
+
     return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
   } catch (err) {
     return NextResponse.json(
@@ -63,6 +78,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    await ensureStoreAsync();
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get('id');
     if (!accountId) {

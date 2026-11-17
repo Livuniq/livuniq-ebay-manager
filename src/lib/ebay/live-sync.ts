@@ -1,4 +1,4 @@
-import { getStore } from './server-store';
+import { getStore, saveStore, saveStoreAsync } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
 import { isVideoMedia, cleanAndDecodeDescription } from './template-engine';
@@ -63,15 +63,13 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
       account.accessToken = data.access_token;
       account.tokenExpiresAt = new Date(Date.now() + (data.expires_in || 7200) * 1000).toISOString();
 
-      // Persist in state file
+      // Persist in state file / cloud database
       const targetAcc = store.accounts.find((a) => a.id === account.id);
       if (targetAcc) {
         targetAcc.accessToken = data.access_token;
         targetAcc.tokenExpiresAt = account.tokenExpiresAt;
       }
-      const DATA_DIR = path.join(process.cwd(), '.data');
-      const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
-      fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+      await saveStoreAsync(store);
       console.log('Successfully refreshed eBay access token for', account.ebayUsername);
       return data.access_token;
     } else {
@@ -131,7 +129,35 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
     if (matchUser && matchUser[1]) {
       realUsername = matchUser[1];
       account.ebayUsername = realUsername;
-      account.storeName = `${realUsername} Store`;
+      if (!account.storeName || account.storeName === 'eBay Live Store') {
+        account.storeName = `${realUsername} Store`;
+      }
+    }
+
+    // Try fetching formal eBay Store name via GetStore
+    try {
+      const getStoreXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetStoreRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <CategoryStructureOnly>false</CategoryStructureOnly>
+</GetStoreRequest>`;
+      const storeRes = await fetch(tradingUrl, {
+        method: 'POST',
+        headers: {
+          'X-EBAY-API-SITEID': siteId,
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+          'X-EBAY-API-CALL-NAME': 'GetStore',
+          'X-EBAY-API-IAF-TOKEN': accessToken,
+          'Content-Type': 'text/xml',
+        },
+        body: getStoreXml,
+      });
+      const storeXml = await storeRes.text();
+      const matchStore = storeXml.match(/<Store>[\s\S]*?<Name>([^<]+)<\/Name>/i);
+      if (matchStore && matchStore[1]) {
+        account.storeName = decodeXmlEntities(matchStore[1]);
+      }
+    } catch {
+      // Store subscription not active or error - retain username store
     }
   } catch (err) {
     console.error('Error fetching user from Trading API:', err);
@@ -357,9 +383,14 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
 
   account.lastSyncedAt = new Date().toISOString();
 
-  const DATA_DIR = path.join(process.cwd(), '.data');
-  const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
-  fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  const targetAcc = store.accounts.find((a) => a.id === account.id);
+  if (targetAcc) {
+    targetAcc.ebayUsername = account.ebayUsername;
+    targetAcc.storeName = account.storeName;
+    targetAcc.lastSyncedAt = account.lastSyncedAt;
+  }
+
+  await saveStoreAsync(store);
 
   return {
     syncedListings: fetchedListings.length,

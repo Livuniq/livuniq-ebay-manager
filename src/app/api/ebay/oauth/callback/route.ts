@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getMasterConfig, connectNewAccount, getStore, ensureStoreAsync } from '@/lib/ebay/server-store';
+import { getMasterConfig, connectNewAccount, getStore, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
 import { syncLiveEbayData } from '@/lib/ebay/live-sync';
-import fs from 'fs';
-import path from 'path';
 
 export async function GET(request: Request) {
   await ensureStoreAsync();
@@ -56,10 +54,69 @@ export async function GET(request: Request) {
       );
     }
 
+    // Detect real eBay username & store name directly via Trading API
+    let initialUsername = 'eBay_Seller';
+    let initialStoreName = 'eBay Store';
+
+    try {
+      const siteId = '0';
+      const tradingUrl = isSandbox
+        ? 'https://api.sandbox.ebay.com/ws/api.dll'
+        : 'https://api.ebay.com/ws/api.dll';
+
+      const getUserXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetUserRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetUserRequest>`;
+
+      const userRes = await fetch(tradingUrl, {
+        method: 'POST',
+        headers: {
+          'X-EBAY-API-SITEID': siteId,
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+          'X-EBAY-API-CALL-NAME': 'GetUser',
+          'X-EBAY-API-IAF-TOKEN': tokenData.access_token,
+          'Content-Type': 'text/xml',
+        },
+        body: getUserXml,
+      });
+
+      const userText = await userRes.text();
+      const matchUser = userText.match(/<UserID>([^<]+)<\/UserID>/);
+      if (matchUser && matchUser[1]) {
+        initialUsername = matchUser[1];
+        initialStoreName = `${initialUsername} Store`;
+      }
+
+      // Try GetStore for formal eBay store name
+      const getStoreXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetStoreRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <CategoryStructureOnly>false</CategoryStructureOnly>
+</GetStoreRequest>`;
+      const storeRes = await fetch(tradingUrl, {
+        method: 'POST',
+        headers: {
+          'X-EBAY-API-SITEID': siteId,
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+          'X-EBAY-API-CALL-NAME': 'GetStore',
+          'X-EBAY-API-IAF-TOKEN': tokenData.access_token,
+          'Content-Type': 'text/xml',
+        },
+        body: getStoreXml,
+      });
+      const storeXml = await storeRes.text();
+      const matchStore = storeXml.match(/<Store>[\s\S]*?<Name>([^<]+)<\/Name>/i);
+      if (matchStore && matchStore[1]) {
+        initialStoreName = matchStore[1].replace(/&amp;/g, '&');
+      }
+    } catch (e) {
+      console.error('Error pre-fetching user details in OAuth callback:', e);
+    }
+
     // Connect this seller account
     const newAccount = connectNewAccount({
-      ebayUsername: 'eBay_Live_Seller',
-      storeName: 'eBay Live Store',
+      ebayUsername: initialUsername,
+      storeName: initialStoreName,
       marketplace: 'EBAY_US',
     });
 
@@ -70,24 +127,22 @@ export async function GET(request: Request) {
       targetAcc.refreshToken = tokenData.refresh_token;
       targetAcc.tokenExpiresAt = new Date(Date.now() + (tokenData.refresh_token_expires_in || 47304000) * 1000).toISOString();
       targetAcc.lastSyncedAt = new Date().toISOString();
+      await saveStoreAsync(store);
 
       // Immediately pull real live listings & orders directly using eBay Trading API!
       try {
         const syncRes = await syncLiveEbayData(targetAcc);
-        if (syncRes.username && syncRes.username !== 'eBay_Live_Seller') {
+        if (syncRes.username && syncRes.username !== 'eBay_Seller') {
           targetAcc.ebayUsername = syncRes.username;
-          targetAcc.storeName = `${syncRes.username} Store`;
         }
       } catch (liveSyncErr) {
         console.error('Live sync error during OAuth callback:', liveSyncErr);
       }
     }
 
-    const DATA_DIR = path.join(process.cwd(), '.data');
-    const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
-    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+    await saveStoreAsync(store);
 
-    return NextResponse.redirect(new URL(`/?connected_store=${encodeURIComponent(targetAcc?.ebayUsername || 'eBay_Seller')}`, request.url));
+    return NextResponse.redirect(new URL(`/?connected_store=${encodeURIComponent(targetAcc?.ebayUsername || initialUsername)}`, request.url));
   } catch (err) {
     console.error('OAuth Callback processing error:', err);
     return NextResponse.redirect(new URL(`/?oauth_error=${encodeURIComponent((err as Error).message)}`, request.url));
