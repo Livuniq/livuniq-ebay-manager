@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getTemplates, saveTemplate, deleteTemplate } from '@/lib/ebay/server-store';
+import { getTemplates, saveTemplate, deleteTemplate, ensureStoreAsync } from '@/lib/ebay/server-store';
 
 export async function GET() {
+  await ensureStoreAsync();
   const templates = getTemplates();
   return NextResponse.json({ success: true, templates });
 }
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
     if (!body.name || !body.html) {
       return NextResponse.json({ success: false, error: 'Name and HTML content are required' }, { status: 400 });

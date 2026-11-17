@@ -3,6 +3,7 @@ import path from 'path';
 import { initialMasterConfig, initialAccounts, initialListings, initialOrders, initialThreads } from './data';
 import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, MasterAppConfig } from './types';
 import { DescriptionTemplate, DEFAULT_TEMPLATES } from './template-engine';
+import { isDbConfigured, fetchDbState, persistDbState } from './db';
 import {
   DEFAULT_SPECIFICS_MAPPINGS,
   isEbayItemSpecific,
@@ -41,6 +42,50 @@ export const DATA_DIR = isVercel ? path.join('/tmp', '.data') : path.join(proces
 export const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
 
 let memoryStore: AppStore | null = null;
+let lastDbFetchTime = 0;
+const DB_CACHE_TTL_MS = 5000;
+
+export async function ensureStoreAsync(): Promise<AppStore> {
+  const now = Date.now();
+  if (isDbConfigured()) {
+    if (!memoryStore || now - lastDbFetchTime > DB_CACHE_TTL_MS) {
+      try {
+        const dbData = await fetchDbState();
+        if (dbData && typeof dbData === 'object' && Array.isArray(dbData.accounts)) {
+          if (!dbData.masterConfig?.masterAppId && process.env.EBAY_MASTER_APP_ID) {
+            dbData.masterConfig = {
+              ...dbData.masterConfig,
+              masterAppId: process.env.EBAY_MASTER_APP_ID,
+              masterCertId: process.env.EBAY_MASTER_CERT_ID || '',
+              masterRuName: process.env.EBAY_MASTER_RU_NAME || '',
+              isLiveConfigured: true,
+            };
+          }
+          memoryStore = dbData as AppStore;
+          lastDbFetchTime = now;
+          return memoryStore;
+        } else if (!dbData && memoryStore) {
+          await persistDbState(memoryStore);
+        }
+      } catch (err) {
+        console.error('[Neon DB] Error in ensureStoreAsync:', err);
+      }
+    }
+  }
+  return ensureDataFile();
+}
+
+export async function saveStoreAsync(store: AppStore): Promise<void> {
+  saveStore(store);
+  if (isDbConfigured()) {
+    try {
+      await persistDbState(store);
+      lastDbFetchTime = Date.now();
+    } catch (err) {
+      console.error('[Neon DB] Error in saveStoreAsync:', err);
+    }
+  }
+}
 
 function ensureDataFile(): AppStore {
   if (memoryStore) {
@@ -101,7 +146,13 @@ export function saveStore(store: AppStore) {
     }
     fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Failed to save eBay store:', err);
+    // console.error('Failed to save eBay store to disk:', err);
+  }
+
+  if (isDbConfigured()) {
+    persistDbState(store).catch((err) =>
+      console.error('[Neon DB] Background persist error:', err)
+    );
   }
 }
 

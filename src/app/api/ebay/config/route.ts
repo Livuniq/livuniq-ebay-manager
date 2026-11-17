@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getMasterConfig, updateMasterConfig } from '@/lib/ebay/server-store';
+import { getMasterConfig, updateMasterConfig, ensureStoreAsync } from '@/lib/ebay/server-store';
 
 export async function GET() {
+  await ensureStoreAsync();
   const masterConfig = getMasterConfig();
   if (!masterConfig.masterAppId && process.env.EBAY_MASTER_APP_ID) {
     masterConfig.masterAppId = process.env.EBAY_MASTER_APP_ID;
@@ -20,6 +21,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
     const updated = updateMasterConfig({
       masterAppId: body.masterAppId,

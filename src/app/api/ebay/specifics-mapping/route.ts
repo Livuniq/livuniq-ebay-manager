@@ -4,6 +4,7 @@ import {
   saveSpecificsMappings,
   getCategoryProfiles,
   saveCategoryProfiles,
+  ensureStoreAsync,
 } from '@/lib/ebay/server-store';
 import {
   DEFAULT_SPECIFICS_MAPPINGS,
@@ -14,6 +15,7 @@ import {
 
 export async function GET() {
   try {
+    await ensureStoreAsync();
     const rules = getSpecificsMappings();
     const profiles = getCategoryProfiles();
     return NextResponse.json({
@@ -33,6 +35,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
 
     let savedProfiles: MasterCategoryProfile[] | undefined = undefined;

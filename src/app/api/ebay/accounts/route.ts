@@ -5,9 +5,11 @@ import {
   setActiveAccountId,
   connectNewAccount,
   disconnectAccount,
+  ensureStoreAsync,
 } from '@/lib/ebay/server-store';
 
 export async function GET() {
+  await ensureStoreAsync();
   const accounts = getAccounts();
   const activeAccountId = getActiveAccountId();
   return NextResponse.json({
@@ -19,6 +21,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
 
     // Action 1: Switch active account

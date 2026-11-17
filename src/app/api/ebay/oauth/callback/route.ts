@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getMasterConfig, connectNewAccount, getStore } from '@/lib/ebay/server-store';
+import { getMasterConfig, connectNewAccount, getStore, ensureStoreAsync } from '@/lib/ebay/server-store';
 import { syncLiveEbayData } from '@/lib/ebay/live-sync';
 import fs from 'fs';
 import path from 'path';
 
 export async function GET(request: Request) {
+  await ensureStoreAsync();
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');

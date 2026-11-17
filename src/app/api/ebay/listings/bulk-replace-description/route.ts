@@ -4,11 +4,13 @@ import {
   getActiveAccountId,
   getAccounts,
   getStore,
+  ensureStoreAsync,
 } from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing } from '@/lib/ebay/live-sync';
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
     const { fromText, toText = '', accountId, listingIds, caseSensitive = false, dryRun = false, pushToEbay = false } = body;
 

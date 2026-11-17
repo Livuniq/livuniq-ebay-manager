@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getListings, createListing, updateListing, deleteListing, clearAllListings, getActiveAccountId, getAccounts } from '@/lib/ebay/server-store';
+import { getListings, createListing, updateListing, deleteListing, clearAllListings, getActiveAccountId, getAccounts, ensureStoreAsync } from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing, addLiveEbayListing, endLiveEbayListing } from '@/lib/ebay/live-sync';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
 
 export async function GET(request: Request) {
+  await ensureStoreAsync();
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get('accountId') || undefined;
   const listings = getListings(accountId);
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const data = await request.json();
     if (!data.title || data.price === undefined) {
       return NextResponse.json(
@@ -125,6 +127,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
     const { id, pushToEbay, ...updates } = body;
 
@@ -358,6 +361,7 @@ export async function PATCH(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    await ensureStoreAsync();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
     const all = searchParams.get('all') === 'true';

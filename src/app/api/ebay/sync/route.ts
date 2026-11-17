@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getStore, getActiveAccountId } from '@/lib/ebay/server-store';
+import { getStore, getActiveAccountId, ensureStoreAsync } from '@/lib/ebay/server-store';
 import { syncLiveEbayData } from '@/lib/ebay/live-sync';
 import fs from 'fs';
 import path from 'path';
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json().catch(() => ({}));
     const store = getStore();
     const accountId = body.accountId || getActiveAccountId();
