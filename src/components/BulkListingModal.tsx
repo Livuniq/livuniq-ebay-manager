@@ -776,56 +776,84 @@ export default function BulkListingModal({
 
     setUploadingBrowserImages(true);
     setErrorMessage('');
+
+    const newImages: StagedImage[] = [];
+    const newVideos: StagedVideo[] = [];
+
     try {
-      const formData = new FormData();
+      // Upload files individually to safely stay well under Vercel's 4.5 MB serverless payload limit
       for (let i = 0; i < files.length; i++) {
-        formData.append('files', files[i]);
-        const rel = (files[i] as any).webkitRelativePath || files[i].name;
+        const file = files[i];
+        const rel = (file as any).webkitRelativePath || file.name;
+        const dirParts = rel.replace(/\\/g, '/').split('/');
+        const folderName = dirParts.length > 1 ? dirParts[dirParts.length - 2] : '';
+        const isVid = file.type.startsWith('video/') || isVideoMedia(file.name);
+
+        const formData = new FormData();
+        formData.append('files', file);
         formData.append('relativePaths', rel);
-      }
 
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
+        let uploadSucceeded = false;
+        try {
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
 
-      const data = await res.json();
-      if (data.success && data.files) {
-        const newImages: StagedImage[] = [];
-        const newVideos: StagedVideo[] = [];
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.files && data.files.length > 0) {
+              const f = data.files[0];
+              if (isVid) {
+                newVideos.push({
+                  filename: f.originalName || f.name || file.name,
+                  folderName,
+                  relativePath: rel,
+                  url: f.url,
+                });
+              } else {
+                newImages.push({
+                  filename: f.originalName || f.name || file.name,
+                  folderName,
+                  relativePath: rel,
+                  url: f.url,
+                  size: f.size || file.size,
+                });
+              }
+              uploadSucceeded = true;
+            }
+          }
+        } catch {
+          // If upload fails or payload too large on serverless, fallback to local object URL
+        }
 
-        data.files.forEach((f: any, idx: number) => {
-          const originalRel = (files[idx] as any)?.webkitRelativePath || f.relativePath || f.name;
-          const dirParts = originalRel.replace(/\\/g, '/').split('/');
-          const folderName = f.folderName || (dirParts.length > 1 ? dirParts[dirParts.length - 2] : '');
-          const isVid = f.type === 'video' || isVideoMedia(f.originalName || f.name || f.filename || f.url);
-
+        if (!uploadSucceeded) {
+          // Fallback: Instant client-side blob URL preview
+          const clientUrl = URL.createObjectURL(file);
           if (isVid) {
             newVideos.push({
-              filename: f.originalName || f.name || f.filename,
+              filename: file.name,
               folderName,
-              relativePath: originalRel,
-              url: f.url,
+              relativePath: rel,
+              url: clientUrl,
             });
           } else {
             newImages.push({
-              filename: f.originalName || f.name || f.filename,
+              filename: file.name,
               folderName,
-              relativePath: originalRel,
-              url: f.url,
-              size: f.size,
+              relativePath: rel,
+              url: clientUrl,
+              size: file.size,
             });
           }
-        });
-
-        const updatedImages = [...stagedImages, ...newImages];
-        const updatedVideos = [...stagedVideos, ...newVideos];
-        setStagedImages(updatedImages);
-        setStagedVideos(updatedVideos);
-        rematchImages(parsedRows, updatedImages, updatedVideos);
-      } else {
-        setErrorMessage(data.error || 'Failed to upload folder images');
+        }
       }
+
+      const updatedImages = [...stagedImages, ...newImages];
+      const updatedVideos = [...stagedVideos, ...newVideos];
+      setStagedImages(updatedImages);
+      setStagedVideos(updatedVideos);
+      rematchImages(parsedRows, updatedImages, updatedVideos);
     } catch (err) {
       setErrorMessage((err as Error).message);
     } finally {

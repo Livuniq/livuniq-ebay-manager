@@ -21,12 +21,22 @@ export async function POST(request: Request) {
     const account = accounts.find((a) => a.id === getActiveAccountId()) || accounts.find((a) => a.accessToken);
     const accessToken = account?.accessToken;
 
-    const publicDir = path.join(process.cwd(), 'public');
-    const imagesDir = path.join(publicDir, 'uploads', 'images');
-    const videosDir = path.join(publicDir, 'uploads', 'videos');
+    const isVercel = Boolean(
+      process.env.VERCEL ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME ||
+      process.env.NOW_REGION
+    );
 
-    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
-    if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
+    const publicDir = isVercel ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'public');
+    const imagesDir = isVercel ? path.join(publicDir, 'images') : path.join(publicDir, 'uploads', 'images');
+    const videosDir = isVercel ? path.join(publicDir, 'videos') : path.join(publicDir, 'uploads', 'videos');
+
+    try {
+      if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+      if (!fs.existsSync(videosDir)) fs.mkdirSync(videosDir, { recursive: true });
+    } catch {
+      // non-fatal on serverless
+    }
 
     const masterConfig = getMasterConfig();
     const mediaEndpoint =
@@ -55,13 +65,23 @@ export async function POST(request: Request) {
       const targetDir = isVideo ? videosDir : imagesDir;
       const subFolder = isVideo ? 'videos' : 'images';
 
-      // 1. Clean file name & save locally
+      // 1. Clean file name & save locally if disk is writable
       const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const uniqueName = `${Date.now()}-${cleanName}`;
       const filePath = path.join(targetDir, uniqueName);
-      fs.writeFileSync(filePath, buffer);
+      let finalUrl = isVideo
+        ? `/uploads/videos/${uniqueName}`
+        : `data:${file.type || 'image/jpeg'};base64,${buffer.toString('base64')}`;
 
-      let finalUrl = `/uploads/${subFolder}/${uniqueName}`;
+      try {
+        fs.writeFileSync(filePath, buffer);
+        if (!isVercel) {
+          finalUrl = `/uploads/${subFolder}/${uniqueName}`;
+        }
+      } catch (wErr) {
+        // Disk write not permitted on serverless readonly
+      }
+
       let activeBuffer = buffer;
 
       // 1b. If it's a video, automatically downscale and transcode to 1080p MP4 (H.264 / AAC) for eBay compliance!
