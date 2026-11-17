@@ -346,8 +346,10 @@ export async function PATCH(request: Request) {
         }
 
         if (isSuccess) {
+          const finalId = newEbayId || currentListing.ebayListingId;
           currentListing = updateListing(id, {
-            ebayListingId: newEbayId,
+            ebayListingId: finalId,
+            status: (currentListing.quantity || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK',
             hasUnpublishedChanges: false,
             lastSyncedWithEbayAt: new Date().toISOString(),
           }) || currentListing;

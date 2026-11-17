@@ -255,7 +255,20 @@ export function getListings(accountId?: string): EbayListing[] {
   if (!targetAccount || !store.accounts.some((a) => a.id === targetAccount)) {
     return [];
   }
-  return store.listings.filter((l) => l.accountId === targetAccount);
+  return store.listings
+    .filter((l) => l.accountId === targetAccount)
+    .map((l) => {
+      // Auto-heal status: If it has a real eBay item ID, it is live and active on eBay
+      if (
+        l.ebayListingId &&
+        l.ebayListingId !== 'Pending' &&
+        /^\d+$/.test(l.ebayListingId.trim()) &&
+        l.status === 'DRAFT'
+      ) {
+        l.status = (l.quantity || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
+      }
+      return l;
+    });
 }
 
 export function createListing(item: Omit<EbayListing, 'id' | 'lastUpdated' | 'sold'>): EbayListing {

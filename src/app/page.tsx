@@ -70,7 +70,7 @@ export default function Home() {
 
   // Search & Filter states
   const [listingSearch, setListingSearch] = useState('');
-  const [listingFilter, setListingFilter] = useState<'ALL' | 'ACTIVE' | 'OUT_OF_STOCK'>('ALL');
+  const [listingFilter, setListingFilter] = useState<'ALL' | 'ACTIVE' | 'DRAFT' | 'OUT_OF_STOCK'>('ALL');
   const [orderFilter, setOrderFilter] = useState<'ALL' | 'PAID_AWAITING_SHIPMENT' | 'SHIPPED'>('ALL');
 
   // Modals
@@ -438,11 +438,20 @@ export default function Home() {
     }
   };
 
+  const isListingLive = (l: EbayListing) =>
+    l.status === 'ACTIVE' ||
+    Boolean(l.ebayListingId && l.ebayListingId !== 'Pending' && /^\d+$/.test(l.ebayListingId.replace(/^#/, '').trim()));
+
+  const isListingDraft = (l: EbayListing) => {
+    const live = isListingLive(l);
+    return l.hasUnpublishedChanges || (!live && (l.status === 'DRAFT' || !l.ebayListingId || l.ebayListingId === 'Pending'));
+  };
+
   // Publish All Drafts in Bulk to live eBay
   const [publishingDrafts, setPublishingDrafts] = useState(false);
 
   const handlePublishAllDrafts = async () => {
-    const drafts = listings.filter((l) => l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId);
+    const drafts = listings.filter((l) => isListingDraft(l));
     if (drafts.length === 0) {
       alert('Koi unpublished draft nahi mila. Saare listings pehle se eBay par live hain!');
       return;
@@ -845,7 +854,7 @@ export default function Home() {
   const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
 
   // Active Store Metrics
-  const activeListingsCount = listings.filter((l) => l.status === 'ACTIVE').length;
+  const activeListingsCount = listings.filter((l) => isListingLive(l)).length;
   const pendingOrdersCount = orders.filter((o) => o.status === 'PAID_AWAITING_SHIPMENT').length;
   const unreadMessagesCount = threads.filter((t) => t.unread).length;
   const totalRevenue = orders.reduce((acc, curr) => acc + curr.totalAmount, 0);
@@ -855,8 +864,10 @@ export default function Home() {
     const matchesSearch =
       item.title.toLowerCase().includes(listingSearch.toLowerCase()) ||
       item.sku.toLowerCase().includes(listingSearch.toLowerCase());
+    const isLive = isListingLive(item);
+    const effectiveStatus = isLive ? 'ACTIVE' : item.status === 'DRAFT' ? 'DRAFT' : 'OUT_OF_STOCK';
     const matchesFilter =
-      listingFilter === 'ALL' ? true : item.status === listingFilter;
+      listingFilter === 'ALL' ? true : effectiveStatus === listingFilter;
     return matchesSearch && matchesFilter;
   });
 
@@ -1381,6 +1392,16 @@ export default function Home() {
                     Active ({activeListingsCount})
                   </button>
                   <button
+                    onClick={() => setListingFilter('DRAFT')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                      listingFilter === 'DRAFT'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Drafts ({listings.filter((l) => isListingDraft(l)).length})
+                  </button>
+                  <button
                     onClick={() => setListingFilter('OUT_OF_STOCK')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
                       listingFilter === 'OUT_OF_STOCK'
@@ -1388,13 +1409,13 @@ export default function Home() {
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
-                    Out of Stock ({listings.filter((l) => l.status === 'OUT_OF_STOCK').length})
+                    Out of Stock ({listings.filter((l) => !isListingDraft(l) && l.status === 'OUT_OF_STOCK').length})
                   </button>
 
                   <div className="h-4 w-px bg-slate-300 mx-1 hidden sm:block" />
 
                   {/* Publish All Drafts Button */}
-                  {listings.some((l) => l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId) && (
+                  {listings.some((l) => isListingDraft(l)) && (
                     <button
                       onClick={handlePublishAllDrafts}
                       disabled={publishingDrafts}
@@ -1407,7 +1428,7 @@ export default function Home() {
                         <UploadCloud className="w-3.5 h-3.5" />
                       )}
                       <span>
-                        Publish All Drafts ({listings.filter((l) => l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId).length})
+                        Publish All Drafts ({listings.filter((l) => isListingDraft(l)).length})
                       </span>
                     </button>
                   )}
@@ -1491,7 +1512,20 @@ export default function Home() {
                             </td>
 
                             <td className="py-3 px-4 font-mono text-[11px] text-slate-600">
-                              <div>#{item.ebayListingId || 'Pending'}</div>
+                              {item.ebayListingId && item.ebayListingId !== 'Pending' && /^\d+$/.test(item.ebayListingId.replace(/^#/, '').trim()) ? (
+                                <a
+                                  href={`https://www.ebay.com/itm/${item.ebayListingId.replace(/^#/, '').trim()}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:text-blue-800 hover:underline font-semibold inline-flex items-center gap-1"
+                                  title="View live listing on eBay"
+                                >
+                                  #{item.ebayListingId.replace(/^#/, '').trim()}
+                                  <ExternalLink className="w-2.5 h-2.5" />
+                                </a>
+                              ) : (
+                                <div>#{item.ebayListingId || 'Pending'}</div>
+                              )}
                               <div className="text-slate-400">SKU: {item.sku}</div>
                             </td>
 
@@ -1543,17 +1577,22 @@ export default function Home() {
 
                             <td className="py-3 px-4">
                               <div className="flex flex-col gap-1 items-start">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                                    item.status === 'ACTIVE'
-                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                      : item.status === 'DRAFT'
-                                      ? 'bg-slate-100 text-slate-700 border border-slate-300'
-                                      : 'bg-rose-100 text-rose-800 border border-rose-200'
-                                  }`}
-                                >
-                                  {item.status === 'ACTIVE' ? 'Live on eBay' : item.status === 'DRAFT' ? 'Draft' : 'Out of Stock'}
-                                </span>
+                                {(() => {
+                                  const isLive = isListingLive(item);
+                                  return (
+                                    <span
+                                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                                        isLive
+                                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                          : item.status === 'DRAFT'
+                                          ? 'bg-slate-100 text-slate-700 border border-slate-300'
+                                          : 'bg-rose-100 text-rose-800 border border-rose-200'
+                                      }`}
+                                    >
+                                      {isLive ? 'Live on eBay' : item.status === 'DRAFT' ? 'Draft' : 'Out of Stock'}
+                                    </span>
+                                  );
+                                })()}
                                 {item.scheduledTime && (
                                   <button
                                     type="button"
