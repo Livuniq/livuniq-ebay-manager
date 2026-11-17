@@ -20,10 +20,13 @@ export async function GET(request: Request) {
   }
 
   const masterConfig = getMasterConfig();
-  const tokenHost =
+  const isSandbox = Boolean(
+    masterConfig.masterAppId?.includes('-SBX-') ||
     masterConfig.environment === 'sandbox'
-      ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
-      : 'https://api.ebay.com/identity/v1/oauth2/token';
+  );
+  const tokenHost = isSandbox
+    ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
+    : 'https://api.ebay.com/identity/v1/oauth2/token';
 
   try {
     const credentials = Buffer.from(

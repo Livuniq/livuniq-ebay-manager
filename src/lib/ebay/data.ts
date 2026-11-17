@@ -1,11 +1,11 @@
 import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, MasterAppConfig } from './types';
 
 export const initialMasterConfig: MasterAppConfig = {
-  masterAppId: '',
-  masterCertId: '',
-  masterRuName: '',
-  environment: 'demo',
-  isLiveConfigured: false,
+  masterAppId: process.env.EBAY_MASTER_APP_ID || '',
+  masterCertId: process.env.EBAY_MASTER_CERT_ID || '',
+  masterRuName: process.env.EBAY_MASTER_RU_NAME || '',
+  environment: 'sandbox',
+  isLiveConfigured: Boolean(process.env.EBAY_MASTER_APP_ID),
 };
 
 export const initialAccounts: ConnectedAccount[] = [

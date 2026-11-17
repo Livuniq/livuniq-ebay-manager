@@ -156,8 +156,15 @@ export async function PATCH(request: Request) {
       updates.itemSpecifics = cleanSpecifics;
     }
 
-    // Default to local changes unless pushToEbay is explicitly requested
-    const shouldPushToEbay = Boolean(pushToEbay);
+    const allListings = getListings();
+    const existingListing = allListings.find((l) => l.id === id);
+    if (!existingListing) {
+      return NextResponse.json({ success: false, error: 'Listing not found' }, { status: 404 });
+    }
+
+    // Push to eBay if explicitly requested OR if updating schedule time on an existing eBay listing
+    const isScheduleChangeOnLiveItem = Boolean(existingListing.ebayListingId && updates.scheduledTime !== undefined);
+    const shouldPushToEbay = Boolean(pushToEbay) || isScheduleChangeOnLiveItem;
     if (!shouldPushToEbay) {
       updates.hasUnpublishedChanges = true;
     }
@@ -210,6 +217,7 @@ export async function PATCH(request: Request) {
             returnPolicyName: currentListing.returnPolicyName,
             paymentPolicyId: currentListing.paymentPolicyId,
             paymentPolicyName: currentListing.paymentPolicyName,
+            scheduledTime: currentListing.scheduledTime,
           });
 
           console.log('eBay reviseLiveEbayListing result:', reviseResult);
@@ -218,6 +226,30 @@ export async function PATCH(request: Request) {
             isSuccess = true;
             ebayLiveStatus = 'LIVE_UPDATED';
             ebayMessage = reviseResult.message;
+          } else if (reviseResult.message.includes('The scheduled time occurs in the past')) {
+            // Item is already active on eBay (cannot set schedule time on an already active listing)
+            const retryResult = await reviseLiveEbayListing(account, currentListing.ebayListingId, {
+              title: currentListing.title,
+              price: currentListing.price,
+              quantity: currentListing.quantity,
+              sku: currentListing.sku,
+              description: currentListing.description,
+              images: currentListing.images,
+              itemSpecifics: currentListing.itemSpecifics,
+              conditionDescription: currentListing.sellerNotes,
+              categoryId: currentListing.categoryId,
+              conditionId: currentListing.conditionId,
+              videoId: currentListing.videoId,
+              shippingPolicyId: currentListing.shippingPolicyId,
+              shippingPolicyName: currentListing.shippingPolicyName,
+              returnPolicyId: currentListing.returnPolicyId,
+              returnPolicyName: currentListing.returnPolicyName,
+              paymentPolicyId: currentListing.paymentPolicyId,
+              paymentPolicyName: currentListing.paymentPolicyName,
+            });
+            isSuccess = true;
+            ebayLiveStatus = 'LIVE_UPDATED';
+            ebayMessage = 'Listing is already live and active on eBay marketplace!';
           } else if (
             reviseResult.message.includes('deleted') ||
             reviseResult.message.includes('not the seller') ||
@@ -244,6 +276,7 @@ export async function PATCH(request: Request) {
               returnPolicyName: currentListing.returnPolicyName,
               paymentPolicyId: currentListing.paymentPolicyId,
               paymentPolicyName: currentListing.paymentPolicyName,
+              scheduledTime: currentListing.scheduledTime,
             });
 
             console.log('Fallback addLiveEbayListing result:', addResult);
@@ -281,6 +314,7 @@ export async function PATCH(request: Request) {
             returnPolicyName: currentListing.returnPolicyName,
             paymentPolicyId: currentListing.paymentPolicyId,
             paymentPolicyName: currentListing.paymentPolicyName,
+            scheduledTime: currentListing.scheduledTime,
           });
 
           console.log('Direct addLiveEbayListing result:', addResult);

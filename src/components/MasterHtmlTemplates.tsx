@@ -23,6 +23,9 @@ import {
   ChevronRight,
   ShieldCheck,
   Check,
+  Replace,
+  RefreshCw,
+  Globe,
 } from 'lucide-react';
 import {
   DescriptionTemplate,
@@ -121,8 +124,16 @@ export default function MasterHtmlTemplates() {
   const [categoryProfiles, setCategoryProfiles] = useState<MasterCategoryProfile[]>([...DEFAULT_CATEGORY_PROFILES]);
   const [loading, setLoading] = useState(true);
 
-  // Active view tab: 'templates' | 'category-mapping'
-  const [subTab, setSubTab] = useState<'templates' | 'category-mapping'>('templates');
+  // Active view tab: 'templates' | 'category-mapping' | 'find-replace'
+  const [subTab, setSubTab] = useState<'templates' | 'category-mapping' | 'find-replace'>('templates');
+
+  // Master Find & Replace (From -> To) state
+  const [frFromText, setFrFromText] = useState('');
+  const [frToText, setFrToText] = useState('');
+  const [frCaseSensitive, setFrCaseSensitive] = useState(false);
+  const [frPushToEbay, setFrPushToEbay] = useState(false);
+  const [frApplying, setFrApplying] = useState(false);
+  const [frDryRunData, setFrDryRunData] = useState<any>(null);
 
   // Editor Modal state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -140,6 +151,35 @@ export default function MasterHtmlTemplates() {
 
   // Status feedback toast
   const [toastMsg, setToastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Debounced dry run check for Find & Replace
+  useEffect(() => {
+    if (subTab !== 'find-replace' || !frFromText.trim()) {
+      setFrDryRunData(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/ebay/listings/bulk-replace-description', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fromText: frFromText,
+            toText: frToText,
+            caseSensitive: frCaseSensitive,
+            dryRun: true,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setFrDryRunData(data);
+        }
+      } catch (err) {
+        console.error('Dry run error:', err);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [subTab, frFromText, frToText, frCaseSensitive]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -442,6 +482,19 @@ export default function MasterHtmlTemplates() {
           <Sparkles className="w-4 h-4 text-amber-500" />
           <span>Category Template Mapping Matrix ({categoryProfiles.length} Categories)</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setSubTab('find-replace')}
+          className={`px-4 py-2.5 text-xs font-bold border-b-2 transition flex items-center gap-2 cursor-pointer ${
+            subTab === 'find-replace'
+              ? 'border-indigo-600 text-indigo-700'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Replace className="w-4 h-4 text-indigo-600" />
+          <span>Description Master Editor (From ➔ To Replace)</span>
+        </button>
       </div>
 
       {/* VIEW 1: ALL TEMPLATES GRID */}
@@ -629,7 +682,164 @@ export default function MasterHtmlTemplates() {
         </div>
       )}
 
-      {/* FULL TEMPLATE EDITOR MODAL (SPLIT VIEW / CODE / PREVIEW) */}
+      {/* VIEW 3: FROM -> TO MASTER DESCRIPTION FIND & REPLACE EDITOR */}
+      {subTab === 'find-replace' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-200">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Replace className="w-5 h-5 text-indigo-600" />
+                <span>Description Master Editor (From ➔ To Replace)</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Sabhi listings ke descriptions me se koi bhi content, phone number, policy text ya HTML tag dhundh kar replace karein. Agar text kisi listing me na mile to wo listing bilkul safe aur same rahegi.
+              </p>
+            </div>
+            {frDryRunData && (
+              <span
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg border ${
+                  frDryRunData.matchedCount > 0
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                }`}
+              >
+                {frDryRunData.matchedCount > 0
+                  ? `✓ Found in ${frDryRunData.matchedCount} of ${frDryRunData.totalChecked} listings`
+                  : 'No matching listings found'}
+              </span>
+            )}
+          </div>
+
+          {/* TWO MAIN BOXES */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="space-y-2">
+              <label className="flex items-center justify-between text-xs font-bold text-slate-800">
+                <span className="flex items-center gap-2 text-indigo-700">
+                  <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[11px]">
+                    1
+                  </span>
+                  <span>1. Find in Description (FROM) *</span>
+                </span>
+                <span className="text-[11px] font-mono text-slate-400 font-normal">
+                  {frFromText.length} chars
+                </span>
+              </label>
+              <textarea
+                rows={9}
+                value={frFromText}
+                onChange={(e) => setFrFromText(e.target.value)}
+                placeholder="Description se jo part replace karna hai wo yahan dalein...&#10;&#10;e.g. Free FedEx Shipping ya koi custom line..."
+                className="w-full border-2 border-indigo-200 focus:border-indigo-500 rounded-xl p-3.5 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 shadow-2xs"
+              />
+              <p className="text-[11px] text-slate-500">
+                System exact yeh text sabhi live/active listing descriptions me search karega.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-center justify-between text-xs font-bold text-slate-800">
+                <span className="flex items-center gap-2 text-emerald-700">
+                  <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[11px]">
+                    2
+                  </span>
+                  <span>2. Replace With (TO)</span>
+                </span>
+                <span className="text-[11px] font-mono text-slate-400 font-normal">
+                  {frToText.length} chars
+                </span>
+              </label>
+              <textarea
+                rows={9}
+                value={frToText}
+                onChange={(e) => setFrToText(e.target.value)}
+                placeholder="Uske badle jo naya text ya HTML chahiye wo yahan dalein...&#10;&#10;(Khali chhodne par dhundha hua text remove/delete ho jayega)"
+                className="w-full border-2 border-emerald-200 focus:border-emerald-500 rounded-xl p-3.5 text-xs font-mono text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-100 shadow-2xs"
+              />
+              <p className="text-[11px] text-slate-500">
+                Found text is naye content se replace ho jayega.
+              </p>
+            </div>
+          </div>
+
+          {/* Options & Action Bar */}
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-5 text-xs">
+              <label className="flex items-center space-x-2 text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={frCaseSensitive}
+                  onChange={(e) => setFrCaseSensitive(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                />
+                <span>Case Sensitive Match</span>
+              </label>
+
+              <label className="flex items-center space-x-2 text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={frPushToEbay}
+                  onChange={(e) => setFrPushToEbay(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                />
+                <span className="flex items-center gap-1 font-semibold text-blue-700">
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Sync changes directly to live eBay listings</span>
+                </span>
+              </label>
+            </div>
+
+            <button
+              type="button"
+              disabled={frApplying || !frFromText || frDryRunData?.matchedCount === 0}
+              onClick={async () => {
+                setFrApplying(true);
+                try {
+                  const res = await fetch('/api/ebay/listings/bulk-replace-description', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      fromText: frFromText,
+                      toText: frToText,
+                      caseSensitive: frCaseSensitive,
+                      dryRun: false,
+                      pushToEbay: frPushToEbay,
+                    }),
+                  });
+                  const data = await res.json();
+                  if (data.success) {
+                    showToast(data.message || `Replaced in ${data.updatedCount} listings!`);
+                  } else {
+                    showToast(data.error || 'Failed', 'error');
+                  }
+                } catch (err: any) {
+                  showToast(err.message, 'error');
+                } finally {
+                  setFrApplying(false);
+                }
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-5 py-2.5 rounded-xl font-bold text-xs flex items-center space-x-2 shadow-md transition cursor-pointer"
+            >
+              {frApplying ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Applying Changes...</span>
+                </>
+              ) : (
+                <>
+                  <Replace className="w-4 h-4" />
+                  <span>
+                    Replace in All Listings{' '}
+                    {frDryRunData && frDryRunData.matchedCount > 0
+                      ? `(${frDryRunData.matchedCount})`
+                      : ''}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {editorOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">
           <div className="bg-white w-full max-w-6xl max-h-[92vh] rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in duration-200">

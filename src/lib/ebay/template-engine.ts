@@ -233,11 +233,37 @@ function formatFloat2Decimals(val: any, forceWeight = false): string {
   return str;
 }
 
+export function cleanAndDecodeDescription(rawDesc?: string | null): string {
+  if (!rawDesc || typeof rawDesc !== 'string') return '';
+  let str = rawDesc.trim();
+  if (str.startsWith('<![CDATA[')) {
+    str = str.substring(9, str.length - 3).trim();
+  }
+
+  // Strip leading placeholder garbage like pppppppppppppppppppp
+  str = str.replace(/^p{5,}\s*/i, '');
+
+  // Strip trailing markers like |x|
+  str = str.replace(/\|x\|$/i, '').trim();
+
+  // Decode XML / HTML entities
+  if (str.includes('&lt;') || str.includes('&gt;') || str.includes('&quot;') || str.includes('&amp;')) {
+    str = str
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+  }
+
+  return str.trim();
+}
+
 // Main Template Interpolation Engine
 export function renderDescriptionTemplate(templateHtml: string, data: ListingTemplateData): string {
   if (!templateHtml) return '';
 
-  let output = templateHtml;
+  let output = cleanAndDecodeDescription(templateHtml);
 
   const currencySymbol = data.currency === 'GBP' ? '£' : data.currency === 'EUR' ? '€' : '$';
   const priceFormatted =

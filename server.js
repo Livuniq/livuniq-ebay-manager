@@ -67,7 +67,7 @@ app.prepare().then(() => {
     console.log('> Ready on http://localhost:3000 AND https://localhost:3000');
   });
 
-  // Auto-Scheduler: Check for scheduled listings due for publishing every 60s
+  // Auto-Scheduler: Check for scheduled listings due for publishing every 15s
   setInterval(() => {
     try {
       const stateFile = path.join(__dirname, '.data', 'ebay_state.json');
@@ -76,7 +76,7 @@ app.prepare().then(() => {
         const state = JSON.parse(raw);
         const nowIso = new Date().toISOString();
         const dueListings = (state.listings || []).filter(
-          (l) => l.scheduledTime && l.scheduledTime <= nowIso && (l.hasUnpublishedChanges || l.status === 'DRAFT' || !l.ebayListingId)
+          (l) => l.scheduledTime && l.scheduledTime <= nowIso && (l.status === 'SCHEDULED' || l.status === 'DRAFT' || l.hasUnpublishedChanges || !l.ebayListingId)
         );
         if (dueListings.length > 0) {
           console.log(`[Auto-Scheduler] ${dueListings.length} scheduled listings reached go-live time. Triggering auto-publish...`);
@@ -91,12 +91,12 @@ app.prepare().then(() => {
             () => {}
           );
           req.on('error', () => {});
-          req.write(JSON.stringify({}));
+          req.write(JSON.stringify({ onlyDue: true }));
           req.end();
         }
       }
     } catch {
       // ignore
     }
-  }, 60000);
+  }, 15000);
 });

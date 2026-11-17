@@ -1,7 +1,7 @@
 import { getStore } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
-import { isVideoMedia } from './template-engine';
+import { isVideoMedia, cleanAndDecodeDescription } from './template-engine';
 import fs from 'fs';
 import path from 'path';
 
@@ -13,6 +13,13 @@ function cleanXmlUrl(url: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+export function isSandboxEnv(masterConfig: any): boolean {
+  return Boolean(
+    masterConfig?.masterAppId?.includes('-SBX-') ||
+    masterConfig?.environment === 'sandbox'
+  );
 }
 
 // Automatically refresh user access token using refreshToken when expired
@@ -30,7 +37,7 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
   }
 
   const tokenHost =
-    masterConfig.environment === 'sandbox'
+    isSandboxEnv(masterConfig)
       ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
       : 'https://api.ebay.com/identity/v1/oauth2/token';
 
@@ -92,7 +99,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
   }
 
   const tradingUrl =
-    masterConfig.environment === 'sandbox'
+    isSandboxEnv(masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -187,10 +194,10 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
 
       const itemId = itemBlock.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
       const title = itemBlock.match(/<Title>([^<]+)<\/Title>/)?.[1] || 'eBay Listing';
-      const priceStr =
-        itemBlock.match(/<BuyItNowPrice[^>]*>([^<]+)<\/BuyItNowPrice>/)?.[1] ||
-        itemBlock.match(/<CurrentPrice[^>]*>([^<]+)<\/CurrentPrice>/)?.[1] ||
-        '0';
+      const curVal = parseFloat(itemBlock.match(/<CurrentPrice[^>]*>([^<]+)<\/CurrentPrice>/)?.[1] || '0');
+      const startVal = parseFloat(itemBlock.match(/<StartPrice[^>]*>([^<]+)<\/StartPrice>/)?.[1] || '0');
+      const binVal = parseFloat(itemBlock.match(/<BuyItNowPrice[^>]*>([^<]+)<\/BuyItNowPrice>/)?.[1] || '0');
+      const parsedPrice = (curVal > 0 ? curVal : null) || (startVal > 0 ? startVal : null) || (binVal > 0 ? binVal : 0);
       const quantityStr =
         itemBlock.match(/<QuantityAvailable>([^<]+)<\/QuantityAvailable>/)?.[1] ||
         itemBlock.match(/<Quantity>([^<]+)<\/Quantity>/)?.[1] ||
@@ -219,7 +226,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
           accountId: account.id,
           sku,
           title,
-          price: parseFloat(priceStr) || 0,
+          price: parsedPrice,
           currency: account.currency || 'USD',
           quantity: parseInt(quantityStr) || 1,
           sold: parseInt(quantitySoldStr) || 0,
@@ -274,22 +281,19 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       const liveTitle = itemDetailXml.match(/<Title>([^<]+)<\/Title>/)?.[1];
       if (liveTitle) item.title = liveTitle;
 
-      // Description (including custom HTML template)
+      // Description (including custom HTML template, cleaned of XML entities & legacy prefixes)
       const descMatch = itemDetailXml.match(/<Description>([\s\S]*?)<\/Description>/);
       if (descMatch) {
-        let cleanDesc = descMatch[1].trim();
-        if (cleanDesc.startsWith('<![CDATA[')) {
-          cleanDesc = cleanDesc.substring(9, cleanDesc.length - 3).trim();
-        }
-        item.description = cleanDesc;
+        item.description = cleanAndDecodeDescription(descMatch[1]);
       }
 
-      // Price
-      const buyItNowPrice =
-        itemDetailXml.match(/<BuyItNowPrice[^>]*>([^<]+)<\/BuyItNowPrice>/)?.[1] ||
-        itemDetailXml.match(/<CurrentPrice[^>]*>([^<]+)<\/CurrentPrice>/)?.[1];
-      if (buyItNowPrice && !isNaN(parseFloat(buyItNowPrice))) {
-        item.price = parseFloat(buyItNowPrice);
+      // Price resolution: Prioritize CurrentPrice (active selling price), then StartPrice, then BuyItNowPrice (if > 0)
+      const curVal = parseFloat(itemDetailXml.match(/<CurrentPrice[^>]*>([^<]+)<\/CurrentPrice>/)?.[1] || '0');
+      const startVal = parseFloat(itemDetailXml.match(/<StartPrice[^>]*>([^<]+)<\/StartPrice>/)?.[1] || '0');
+      const binVal = parseFloat(itemDetailXml.match(/<BuyItNowPrice[^>]*>([^<]+)<\/BuyItNowPrice>/)?.[1] || '0');
+      const realItemPrice = (curVal > 0 ? curVal : null) || (startVal > 0 ? startVal : null) || (binVal > 0 ? binVal : 0);
+      if (realItemPrice > 0) {
+        item.price = realItemPrice;
       }
 
       // Quantity & Stock Status
@@ -451,6 +455,7 @@ export async function reviseLiveEbayListing(
     returnPolicyName?: string;
     paymentPolicyId?: string;
     paymentPolicyName?: string;
+    scheduledTime?: string;
   }
 ): Promise<{ success: boolean; message: string }> {
   const store = getStore();
@@ -462,7 +467,7 @@ export async function reviseLiveEbayListing(
   }
 
   const tradingUrl =
-    masterConfig.environment === 'sandbox'
+    isSandboxEnv(masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -477,6 +482,14 @@ export async function reviseLiveEbayListing(
   }
   if (updates.quantity !== undefined) {
     itemXmlFields += `<Quantity>${updates.quantity}</Quantity>`;
+  }
+  if (updates.scheduledTime) {
+    const schedDate = new Date(updates.scheduledTime);
+    if (!isNaN(schedDate.getTime())) {
+      const now = Date.now();
+      const effectiveTime = schedDate.getTime() > now ? schedDate.toISOString() : new Date(now + 65 * 1000).toISOString();
+      itemXmlFields += `<ScheduleTime>${effectiveTime}</ScheduleTime>`;
+    }
   }
   if (updates.sku) {
     itemXmlFields += `<SKU><![CDATA[${updates.sku}]]></SKU>`;
@@ -507,7 +520,7 @@ export async function reviseLiveEbayListing(
             const ebayForm = new FormData();
             ebayForm.append('image', new Blob([buf], { type: 'image/jpeg' }), path.basename(localPath));
             const epsEndpoint =
-              masterConfig.environment === 'sandbox'
+              isSandboxEnv(masterConfig)
                 ? 'https://apim.sandbox.ebay.com/commerce/media/v1_beta/image/create_image_from_file'
                 : 'https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file';
             const epsRes = await fetch(epsEndpoint, {
@@ -682,7 +695,7 @@ export async function addLiveEbayListing(
   }
 
   const tradingUrl =
-    masterConfig.environment === 'sandbox'
+    isSandboxEnv(masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -723,7 +736,7 @@ export async function addLiveEbayListing(
           const ebayForm = new FormData();
           ebayForm.append('image', new Blob([buf], { type: 'image/jpeg' }), path.basename(localPath));
           const epsEndpoint =
-            masterConfig.environment === 'sandbox'
+            isSandboxEnv(masterConfig)
               ? 'https://apim.sandbox.ebay.com/commerce/media/v1_beta/image/create_image_from_file'
               : 'https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file';
           const epsRes = await fetch(epsEndpoint, {
@@ -884,7 +897,7 @@ export async function endLiveEbayListing(
   }
 
   const tradingUrl =
-    masterConfig.environment === 'sandbox'
+    isSandboxEnv(masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 

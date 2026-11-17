@@ -18,6 +18,7 @@ import {
   DescriptionTemplate,
   ListingTemplateData,
   renderDescriptionTemplate,
+  cleanAndDecodeDescription,
   DEFAULT_TEMPLATES,
 } from '@/lib/ebay/template-engine';
 
@@ -34,7 +35,9 @@ export default function HtmlTemplateSection({
 }: HtmlTemplateSectionProps) {
   const [templates, setTemplates] = useState<DescriptionTemplate[]>([...DEFAULT_TEMPLATES]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('tpl-livuniq-luxury');
-  const [rawTemplate, setRawTemplate] = useState<string>(value || DEFAULT_TEMPLATES[0].html);
+  const [rawTemplate, setRawTemplate] = useState<string>(
+    cleanAndDecodeDescription(value) || DEFAULT_TEMPLATES[0].html
+  );
   const [viewMode, setViewMode] = useState<'preview' | 'code'>('preview');
   const [copied, setCopied] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -54,13 +57,18 @@ export default function HtmlTemplateSection({
       .catch((err) => console.error('Failed to load templates:', err));
   }, []);
 
-  // Sync initial value if empty
+  // Sync initial value if empty or update when listing description value loads
   useEffect(() => {
     if (!value && rawTemplate) {
       const rendered = renderDescriptionTemplate(rawTemplate, listingData);
       onChange(rendered);
+    } else if (value) {
+      const cleaned = cleanAndDecodeDescription(value);
+      setRawTemplate(cleaned);
+      const compiled = renderDescriptionTemplate(cleaned, listingData);
+      onChange(compiled);
     }
-  }, []);
+  }, [value]);
 
   // When raw template or listing data changes, compile to parent onChange
   const handleTemplateChange = (newRaw: string) => {

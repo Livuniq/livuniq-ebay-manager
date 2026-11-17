@@ -4,7 +4,14 @@ import { getMasterConfig } from '@/lib/ebay/server-store';
 export async function GET(request: Request) {
   const masterConfig = getMasterConfig();
   const { searchParams } = new URL(request.url);
-  const environment = searchParams.get('env') || masterConfig.environment || 'production';
+
+  // Auto-detect sandbox if the App ID has -SBX- or environment is sandbox
+  const isSandbox = Boolean(
+    masterConfig.masterAppId?.includes('-SBX-') ||
+    masterConfig.environment === 'sandbox' ||
+    searchParams.get('env') === 'sandbox'
+  );
+
   const marketplace = searchParams.get('marketplace') || 'EBAY_US';
 
   const scopes = [
@@ -15,10 +22,9 @@ export async function GET(request: Request) {
     'https://api.ebay.com/oauth/api_scope/sell.account',
   ].join(' ');
 
-  const authHost =
-    environment === 'sandbox'
-      ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
-      : 'https://auth.ebay.com/oauth2/authorize';
+  const authHost = isSandbox
+    ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
+    : 'https://auth.ebay.com/oauth2/authorize';
 
   // Check if live master keys are entered in Master API Setup
   if (masterConfig.masterAppId && masterConfig.masterRuName) {

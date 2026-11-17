@@ -18,6 +18,8 @@ import {
   DollarSign,
   Save,
   UploadCloud,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
 import { EBAY_JEWELRY_CATEGORIES, EBAY_FILE_EXCHANGE_CONDITIONS } from '@/lib/ebay/constants';
@@ -122,6 +124,10 @@ export default function EditListingModal({
   const [customKey, setCustomKey] = useState('');
   const [customVal, setCustomVal] = useState('');
 
+  // Schedule States
+  const [scheduledTime, setScheduledTime] = useState('');
+  const [isScheduled, setIsScheduled] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
@@ -159,6 +165,29 @@ export default function EditListingModal({
         }
       }
       setSpecifics(initialSpecs);
+
+      if (listing.scheduledTime) {
+        try {
+          const d = new Date(listing.scheduledTime);
+          if (!isNaN(d.getTime())) {
+            // Convert to local YYYY-MM-DDTHH:mm
+            const pad = (n: number) => n.toString().padStart(2, '0');
+            const localStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            setScheduledTime(localStr);
+            setIsScheduled(true);
+          } else {
+            setScheduledTime('');
+            setIsScheduled(false);
+          }
+        } catch {
+          setScheduledTime('');
+          setIsScheduled(false);
+        }
+      } else {
+        setScheduledTime('');
+        setIsScheduled(false);
+      }
+
       setErrorMessage('');
       setSuccessMessage('');
       setActiveTab('basic');
@@ -313,6 +342,7 @@ export default function EditListingModal({
           returnPolicyName,
           paymentPolicyId,
           paymentPolicyName,
+          scheduledTime: isScheduled && scheduledTime ? new Date(scheduledTime).toISOString() : null,
           pushToEbay,
         }),
       });
@@ -590,6 +620,82 @@ export default function EditListingModal({
                     className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+              </div>
+
+              {/* Publishing & Schedule Settings */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-purple-100 text-purple-700 rounded-lg">
+                      <Clock className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-xs">
+                        Publishing & Go-Live Schedule
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Set a specific date & time for this listing to go live on eBay, or keep it as a manual draft.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isScheduled}
+                        onChange={(e) => {
+                          setIsScheduled(e.target.checked);
+                          if (e.target.checked && !scheduledTime) {
+                            const tomorrow = new Date();
+                            tomorrow.setDate(tomorrow.getDate() + 1);
+                            tomorrow.setHours(18, 0, 0, 0);
+                            const pad = (n: number) => n.toString().padStart(2, '0');
+                            setScheduledTime(`${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T18:00`);
+                          }
+                        }}
+                        className="rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                      />
+                      <span className={isScheduled ? 'text-purple-700 font-bold' : 'text-slate-600'}>
+                        Schedule Go-Live
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {isScheduled && (
+                  <div className="bg-white border border-purple-200 rounded-lg p-3 space-y-2 animate-in fade-in duration-200">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                        Scheduled Date & Time (Local):
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={scheduledTime}
+                        onChange={(e) => setScheduledTime(e.target.value)}
+                        className="px-3 py-1.5 border border-purple-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-2xs"
+                      />
+                    </div>
+                    {scheduledTime && (
+                      <div className="text-[11px] text-purple-700 bg-purple-50 p-2 rounded flex items-center justify-between">
+                        <span>
+                          Will go live on: <strong>{new Date(scheduledTime).toLocaleString()}</strong>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsScheduled(false);
+                            setScheduledTime('');
+                          }}
+                          className="text-rose-600 hover:text-rose-800 font-bold text-[10px] underline cursor-pointer"
+                        >
+                          Remove Schedule
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Business Policies (Shipping, Return, Payment) */}

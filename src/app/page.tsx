@@ -21,6 +21,7 @@ import {
   User,
   MapPin,
   Clock,
+  Calendar,
   ShieldCheck,
   Check,
   Store,
@@ -44,7 +45,8 @@ import EditListingModal from '@/components/EditListingModal';
 import BulkListingModal from '@/components/BulkListingModal';
 import MasterSpecificsMapping from '@/components/MasterSpecificsMapping';
 import MasterHtmlTemplates from '@/components/MasterHtmlTemplates';
-import { FileSpreadsheet, SlidersHorizontal, FileCode } from 'lucide-react';
+import MasterDescriptionEditorModal from '@/components/MasterDescriptionEditorModal';
+import { FileSpreadsheet, SlidersHorizontal, FileCode, Replace } from 'lucide-react';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'overview' | 'listings' | 'orders' | 'messages' | 'stores' | 'settings' | 'specifics-mapping' | 'templates-master'>('overview');
@@ -75,6 +77,7 @@ export default function Home() {
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [showAddListingModal, setShowAddListingModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showMasterDescModal, setShowMasterDescModal] = useState(false);
   const [showEditListingModal, setShowEditListingModal] = useState<EbayListing | null>(null);
   const [showFulfillModal, setShowFulfillModal] = useState<EbayOrder | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
@@ -134,6 +137,11 @@ export default function Home() {
   const [clearEndOnEbay, setClearEndOnEbay] = useState(true);
   const [clearScope, setClearScope] = useState<'all' | 'current'>('all');
 
+  // Reschedule Listing Modal State
+  const [rescheduleModalItem, setRescheduleModalItem] = useState<EbayListing | null>(null);
+  const [newScheduleDateTime, setNewScheduleDateTime] = useState('');
+  const [savingSchedule, setSavingSchedule] = useState(false);
+
   // Fetch Accounts list
   const fetchAccountsAndData = async (targetAccId?: string) => {
     try {
@@ -144,9 +152,16 @@ export default function Home() {
       let currentAccId = targetAccId || activeAccountId;
       if (accData.success) {
         setAccounts(accData.accounts);
-        if (!currentAccId && accData.activeAccountId) {
-          currentAccId = accData.activeAccountId;
-          setActiveAccountId(accData.activeAccountId);
+        if (accData.accounts.length === 0) {
+          currentAccId = '';
+          setActiveAccountId('');
+          setListings([]);
+          setOrders([]);
+          setThreads([]);
+          setSelectedThreadId(null);
+        } else if (!currentAccId || !accData.accounts.some((a: any) => a.id === currentAccId)) {
+          currentAccId = accData.activeAccountId || accData.accounts[0].id;
+          setActiveAccountId(currentAccId);
         }
       }
 
@@ -250,8 +265,15 @@ export default function Home() {
       const data = await res.json();
       if (data.success) {
         setAccounts(data.accounts);
-        setActiveAccountId(data.activeAccountId);
-        fetchAccountsAndData(data.activeAccountId);
+        setActiveAccountId(data.activeAccountId || '');
+        if (!data.activeAccountId || data.accounts.length === 0) {
+          setListings([]);
+          setOrders([]);
+          setThreads([]);
+          setSelectedThreadId(null);
+        } else {
+          fetchAccountsAndData(data.activeAccountId);
+        }
       }
     } catch (err) {
       console.error('Disconnect error:', err);
@@ -394,6 +416,87 @@ export default function Home() {
       alert(`Error publishing drafts: ${err.message}`);
     } finally {
       setPublishingDrafts(false);
+    }
+  };
+
+  // Open Reschedule Dialog
+  const openRescheduleModal = (item: EbayListing) => {
+    setRescheduleModalItem(item);
+    if (item.scheduledTime) {
+      try {
+        const d = new Date(item.scheduledTime);
+        if (!isNaN(d.getTime())) {
+          const pad = (n: number) => n.toString().padStart(2, '0');
+          setNewScheduleDateTime(
+            `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+          );
+        } else {
+          setNewScheduleDateTime('');
+        }
+      } catch {
+        setNewScheduleDateTime('');
+      }
+    } else {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(18, 0, 0, 0);
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      setNewScheduleDateTime(
+        `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T18:00`
+      );
+    }
+  };
+
+  // Save new schedule date & time or clear schedule
+  const handleSaveReschedule = async (clearSchedule = false) => {
+    if (!rescheduleModalItem) return;
+    setSavingSchedule(true);
+    try {
+      const scheduledTimePayload = clearSchedule || !newScheduleDateTime
+        ? null
+        : new Date(newScheduleDateTime).toISOString();
+
+      const res = await fetch('/api/ebay/listings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: rescheduleModalItem.id,
+          scheduledTime: scheduledTimePayload,
+          publishMode: clearSchedule ? 'DRAFT' : 'SCHEDULE',
+          pushToEbay: Boolean(rescheduleModalItem.ebayListingId),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setListings((prev) =>
+          prev.map((l) =>
+            l.id === rescheduleModalItem.id
+              ? {
+                  ...l,
+                  scheduledTime: scheduledTimePayload || undefined,
+                  hasUnpublishedChanges: data.ebayLiveStatus === 'LIVE_UPDATED' ? false : l.hasUnpublishedChanges,
+                }
+              : l
+          )
+        );
+        setRescheduleModalItem(null);
+        if (data.ebayLiveStatus === 'LIVE_FAILED') {
+          alert(`Schedule updated locally, but eBay returned a note: ${data.ebayMessage}`);
+        } else {
+          alert(
+            clearSchedule
+              ? 'Schedule removed. Listing is now a standard draft.'
+              : `Schedule updated and synced with eBay! Listing will go live on ${new Date(scheduledTimePayload!).toLocaleString()}`
+          );
+        }
+      } else {
+        alert(data.error || 'Failed to update schedule');
+      }
+    } catch (err: any) {
+      alert(`Error updating schedule: ${err.message}`);
+    } finally {
+      setSavingSchedule(false);
     }
   };
 
@@ -618,6 +721,28 @@ export default function Home() {
         body: JSON.stringify({ threadId }),
       });
       setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, unread: false } : t)));
+    }
+  };
+
+  // Simulate an incoming buyer message for testing
+  const [isSimulatingMessage, setIsSimulatingMessage] = useState(false);
+  const handleSimulateMessage = async () => {
+    setIsSimulatingMessage(true);
+    try {
+      const res = await fetch('/api/ebay/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'simulate', accountId: activeAccount?.id }),
+      });
+      const data = await res.json();
+      if (data.success && data.thread) {
+        setThreads((prev) => [data.thread, ...prev]);
+        setSelectedThreadId(data.thread.id);
+      }
+    } catch (err) {
+      console.error('Failed to simulate message:', err);
+    } finally {
+      setIsSimulatingMessage(false);
     }
   };
 
@@ -1229,6 +1354,15 @@ export default function Home() {
                   </button>
 
                   <button
+                    onClick={() => setShowMasterDescModal(true)}
+                    className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
+                    title="Find and replace text or HTML snippets across all descriptions (From ➔ To Editor)"
+                  >
+                    <Replace className="w-3.5 h-3.5" />
+                    <span>Master Description Editor</span>
+                  </button>
+
+                  <button
                     onClick={() => setShowAddListingModal(true)}
                     className="flex items-center space-x-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
                   >
@@ -1354,15 +1488,18 @@ export default function Home() {
                                   {item.status === 'ACTIVE' ? 'Live on eBay' : item.status === 'DRAFT' ? 'Draft' : 'Out of Stock'}
                                 </span>
                                 {item.scheduledTime && (
-                                  <span
-                                    className="text-[10px] text-purple-800 font-bold bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1"
-                                    title={`Scheduled Go-Live: ${new Date(item.scheduledTime).toLocaleString()}`}
+                                  <button
+                                    type="button"
+                                    onClick={() => openRescheduleModal(item)}
+                                    className="text-[10px] text-purple-800 font-bold bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2 py-0.5 rounded-full inline-flex items-center gap-1 cursor-pointer transition shadow-2xs group"
+                                    title={`Click to Change Schedule. Current: ${new Date(item.scheduledTime).toLocaleString()}`}
                                   >
-                                    <Clock className="w-3 h-3 text-purple-600" />
+                                    <Clock className="w-3 h-3 text-purple-600 group-hover:rotate-45 transition-transform" />
                                     <span>
                                       {new Date(item.scheduledTime).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </span>
-                                  </span>
+                                    <span className="text-[9px] text-purple-600 underline ml-0.5">Edit</span>
+                                  </button>
                                 )}
                                 {item.hasUnpublishedChanges && (
                                   <span className="text-[10px] text-amber-800 font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
@@ -1396,6 +1533,16 @@ export default function Home() {
                                     <span>Update to Store</span>
                                   </>
                                 )}
+                              </button>
+
+                              {/* Reschedule Button */}
+                              <button
+                                onClick={() => openRescheduleModal(item)}
+                                className="bg-purple-50 hover:bg-purple-100 text-purple-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-purple-200 transition cursor-pointer inline-flex items-center gap-1"
+                                title="Change scheduled go-live date & time"
+                              >
+                                <Clock className="w-3 h-3 text-purple-600" />
+                                <span>{item.scheduledTime ? 'Change Schedule' : 'Schedule'}</span>
                               </button>
 
                               <button
@@ -1578,123 +1725,222 @@ export default function Home() {
 
           {/* TAB 4: MESSAGES */}
           {activeTab === 'messages' && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 h-[720px] overflow-hidden">
-              <div className="border-r border-slate-200 flex flex-col h-full">
-                <div className="p-3.5 border-b border-slate-200 bg-slate-50 font-semibold text-xs text-slate-700 flex items-center justify-between">
-                  <span>Buyer Inquiries ({threads.length})</span>
-                  {unreadMessagesCount > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
-                      {unreadMessagesCount} unread
-                    </span>
-                  )}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 h-[calc(100vh-185px)] min-h-[520px] max-h-[780px] overflow-hidden">
+              <div className="border-r border-slate-200 flex flex-col h-full min-h-0">
+                <div className="p-3.5 border-b border-slate-200 bg-slate-50 font-semibold text-xs text-slate-700 flex items-center justify-between flex-shrink-0">
+                  <div className="flex items-center space-x-2">
+                    <span>Buyer Inquiries ({threads.length})</span>
+                    {unreadMessagesCount > 0 && (
+                      <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
+                        {unreadMessagesCount} unread
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleSimulateMessage}
+                    disabled={isSimulatingMessage}
+                    className="text-[11px] font-medium bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-slate-200 hover:border-blue-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
+                    title="Generate a test incoming buyer inquiry"
+                  >
+                    <span>{isSimulatingMessage ? 'Creating...' : '+ Test Buyer Message'}</span>
+                  </button>
                 </div>
 
-                <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
+                <div className="overflow-y-auto flex-1 min-h-0 divide-y divide-slate-100">
                   {threads.length === 0 ? (
                     <div className="p-8 text-center text-xs text-slate-400">
                       No buyer messages for this store.
                     </div>
                   ) : (
-                    threads.map((thr) => (
-                      <div
-                        key={thr.id}
-                        onClick={() => handleSelectThread(thr.id)}
-                        className={`p-3.5 cursor-pointer transition ${
-                          selectedThreadId === thr.id
-                            ? 'bg-blue-50/80 border-l-4 border-blue-600'
-                            : 'hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
-                            {thr.unread && (
-                              <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                    threads.map((thr) => {
+                      const thrListing =
+                        listings.find((l) => l.id === thr.listingId) ||
+                        listings.find((l) => l.ebayListingId === thr.listingId) ||
+                        listings.find((l) => l.title?.toLowerCase().includes(thr.itemTitle?.toLowerCase() || '---'));
+
+                      return (
+                        <div
+                          key={thr.id}
+                          onClick={() => handleSelectThread(thr.id)}
+                          className={`p-3 cursor-pointer transition flex items-start space-x-2.5 ${
+                            selectedThreadId === thr.id
+                              ? 'bg-blue-50/80 border-l-4 border-blue-600'
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
+                          {thrListing?.imageUrl ? (
+                            <img
+                              src={thrListing.imageUrl}
+                              alt={thrListing.title}
+                              className="w-10 h-10 object-cover rounded border border-slate-200 flex-shrink-0 mt-0.5 bg-white"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs flex-shrink-0 mt-0.5">
+                              <MessageSquare className="w-4 h-4" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-xs font-bold text-slate-800 flex items-center space-x-1.5 truncate">
+                                {thr.unread && (
+                                  <span className="w-2 h-2 rounded-full bg-blue-600 flex-shrink-0"></span>
+                                )}
+                                <span className="truncate">{thr.buyerUsername}</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400 flex-shrink-0 ml-1">
+                                {new Date(thr.lastUpdated).toLocaleDateString()}
+                              </span>
+                            </div>
+                            {thrListing?.sku && (
+                              <div className="text-[10px] font-semibold text-indigo-600 mb-0.5 flex items-center gap-1">
+                                <span className="bg-indigo-50 border border-indigo-200 px-1 rounded">SKU: {thrListing.sku}</span>
+                              </div>
                             )}
-                            <span>{thr.buyerUsername}</span>
-                          </span>
-                          <span className="text-[10px] text-slate-400">
-                            {new Date(thr.lastUpdated).toLocaleDateString()}
-                          </span>
+                            <div className="text-xs font-medium text-slate-700 truncate">
+                              {thr.subject}
+                            </div>
+                            <div className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                              {thr.lastMessageSnippet}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-xs font-medium text-slate-700 truncate">
-                          {thr.subject}
-                        </div>
-                        <div className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
-                          {thr.lastMessageSnippet}
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
 
               {/* Chat View */}
-              <div className="md:col-span-2 flex flex-col h-full bg-slate-50/40">
+              <div className="md:col-span-2 flex flex-col h-full bg-slate-50/40 min-h-0">
                 {activeThread ? (
-                  <>
-                    <div className="p-4 bg-white border-b border-slate-200">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h3 className="text-sm font-bold text-slate-800">{activeThread.subject}</h3>
-                          <div className="text-xs text-slate-500 mt-0.5">
-                            Buyer: <span className="font-semibold text-slate-700">{activeThread.buyerName}</span> ({activeThread.buyerUsername})
-                          </div>
-                        </div>
-                        {activeThread.itemTitle && (
-                          <div className="text-right text-xs max-w-xs text-slate-500">
-                            Item: <span className="font-medium text-slate-700">{activeThread.itemTitle}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                  (() => {
+                    const matchedListing =
+                      listings.find((l) => l.id === activeThread.listingId) ||
+                      listings.find((l) => l.ebayListingId === activeThread.listingId) ||
+                      listings.find((l) => l.title?.toLowerCase().includes(activeThread.itemTitle?.toLowerCase() || '---')) ||
+                      (activeThread.listingId ? listings[0] : null);
 
-                    <div className="flex-1 p-4 overflow-y-auto space-y-3">
-                      {activeThread.messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`flex flex-col ${
-                            msg.senderRole === 'SELLER' ? 'items-end' : 'items-start'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 mb-1 px-1">
-                            <span className="font-semibold text-slate-600">{msg.sender}</span>
-                            <span>•</span>
-                            <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    return (
+                      <>
+                        {/* Conversation Header & Product Card */}
+                        <div className="p-3.5 bg-white border-b border-slate-200 flex-shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center space-x-2">
+                              <h3 className="text-sm font-bold text-slate-800 truncate">{activeThread.subject}</h3>
+                              {activeThread.unread && (
+                                <span className="bg-blue-100 text-blue-700 text-[10px] px-2 py-0.5 rounded font-semibold flex-shrink-0">
+                                  Unread
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-1 flex items-center space-x-2">
+                              <span>Buyer: <strong className="text-slate-700">{activeThread.buyerName}</strong> ({activeThread.buyerUsername})</span>
+                            </div>
                           </div>
-                          <div
-                            className={`max-w-md p-3.5 rounded-2xl text-xs leading-relaxed ${
-                              msg.senderRole === 'SELLER'
-                                ? 'bg-blue-600 text-white rounded-tr-none shadow-sm'
-                                : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none shadow-sm'
-                            }`}
+
+                          {/* Prominent Matched Listing Card */}
+                          {(matchedListing || activeThread.itemTitle) && (
+                            <div className="flex items-center space-x-2.5 bg-slate-50 hover:bg-slate-100/90 p-2 rounded-lg border border-slate-200 max-w-sm transition flex-shrink-0">
+                              {matchedListing?.imageUrl && (
+                                <img
+                                  src={matchedListing.imageUrl}
+                                  alt={matchedListing.title}
+                                  className="w-11 h-11 object-cover rounded border border-slate-200 flex-shrink-0 bg-white"
+                                />
+                              )}
+                              <div className="min-w-0 text-left">
+                                <div className="text-[11px] font-bold text-slate-800 truncate" title={matchedListing?.title || activeThread.itemTitle}>
+                                  {matchedListing?.title || activeThread.itemTitle}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-1 text-[10px]">
+                                  {matchedListing?.sku && (
+                                    <span className="font-mono font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200">
+                                      SKU: {matchedListing.sku}
+                                    </span>
+                                  )}
+                                  {matchedListing?.price && (
+                                    <span className="font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      ${matchedListing.price.toFixed(2)}
+                                    </span>
+                                  )}
+                                  {matchedListing?.ebayListingId && (
+                                    <a
+                                      href={`https://www.sandbox.ebay.com/itm/${matchedListing.ebayListingId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-600 hover:text-blue-800 hover:underline flex items-center space-x-0.5 font-medium"
+                                      title="Open live listing on eBay Sandbox"
+                                    >
+                                      <span>#{matchedListing.ebayListingId}</span>
+                                      <ExternalLink className="w-2.5 h-2.5 inline ml-0.5" />
+                                    </a>
+                                  )}
+                                  {matchedListing && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowEditListingModal(matchedListing)}
+                                      className="text-slate-600 hover:text-blue-600 font-semibold underline ml-1 cursor-pointer"
+                                    >
+                                      Edit Listing
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Messages Thread Scrollable Area */}
+                        <div className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3">
+                          {activeThread.messages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col ${
+                                msg.senderRole === 'SELLER' ? 'items-end' : 'items-start'
+                              }`}
+                            >
+                              <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 mb-1 px-1">
+                                <span className="font-semibold text-slate-600">{msg.sender}</span>
+                                <span>•</span>
+                                <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                              </div>
+                              <div
+                                className={`max-w-md p-3.5 rounded-2xl text-xs leading-relaxed ${
+                                  msg.senderRole === 'SELLER'
+                                    ? 'bg-blue-600 text-white rounded-tr-none shadow-sm'
+                                    : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none shadow-sm'
+                                }`}
+                              >
+                                {msg.body}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Permanent Sticky Reply Form at Bottom */}
+                        <form onSubmit={handleSendReply} className="flex-shrink-0 p-3 bg-white border-t border-slate-200 flex gap-2 shadow-sm">
+                          <input
+                            type="text"
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value)}
+                            placeholder={`Reply to ${activeThread.buyerName || activeThread.buyerUsername} as ${activeAccount?.ebayUsername}...`}
+                            className="flex-1 border border-slate-300 rounded-lg px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
+                          />
+                          <button
+                            type="submit"
+                            disabled={sendingReply || !replyText.trim()}
+                            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer shadow-sm flex-shrink-0"
                           >
-                            {msg.body}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <form onSubmit={handleSendReply} className="p-3 bg-white border-t border-slate-200 flex gap-2">
-                      <input
-                        type="text"
-                        value={replyText}
-                        onChange={(e) => setReplyText(e.target.value)}
-                        placeholder={`Reply as ${activeAccount?.ebayUsername} (sent via eBay Trading API)...`}
-                        className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                      <button
-                        type="submit"
-                        disabled={sendingReply || !replyText.trim()}
-                        className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>{sendingReply ? 'Sending...' : 'Reply'}</span>
-                      </button>
-                    </form>
-                  </>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{sendingReply ? 'Sending...' : 'Send Reply'}</span>
+                          </button>
+                        </form>
+                      </>
+                    );
+                  })()
                 ) : (
                   <div className="flex-1 flex items-center justify-center text-slate-400 text-xs">
-                    Select a conversation to read & reply
+                    Select a conversation from the left to read & reply
                   </div>
                 )}
               </div>
@@ -1954,11 +2200,13 @@ export default function Home() {
                 </div>
 
                 <a
-                  href={`/api/ebay/oauth/login?marketplace=${connectMarketplace}`}
+                  href={`/api/ebay/oauth/login?marketplace=${connectMarketplace}&env=${masterConfig?.masterAppId?.includes('-SBX-') ? 'sandbox' : (masterConfig?.environment || 'sandbox')}`}
                   className="w-full bg-[#0064D2] hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-md transition"
                 >
                   <Globe className="w-4 h-4" />
-                  <span>Sign in to Official eBay & Allow Access (Live)</span>
+                  <span>
+                    Sign in to Official eBay & Allow Access ({masterConfig?.masterAppId?.includes('-SBX-') ? 'Sandbox Testing' : 'Production Live'})
+                  </span>
                 </a>
               </div>
             ) : (
@@ -2086,6 +2334,17 @@ export default function Home() {
         activeAccount={activeAccount}
         onListingUpdated={(updated) => {
           setListings((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+        }}
+      />
+
+      {/* MASTER DESCRIPTION EDITOR (FROM -> TO FIND & REPLACE) */}
+      <MasterDescriptionEditorModal
+        isOpen={showMasterDescModal}
+        onClose={() => setShowMasterDescModal(false)}
+        accountId={activeAccountId}
+        listings={listings}
+        onComplete={async () => {
+          await fetchAccountsAndData(activeAccountId);
         }}
       />
 
@@ -2314,6 +2573,115 @@ export default function Home() {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: RESCHEDULE GO-LIVE TIME */}
+      {rescheduleModalItem && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in duration-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 bg-purple-50 text-purple-600 rounded-xl">
+                  <Clock className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Change Listing Schedule
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono">
+                    SKU: {rescheduleModalItem.sku}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setRescheduleModalItem(null)}
+                className="text-slate-400 hover:text-slate-700 text-sm p-1 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-slate-700 block truncate" title={rescheduleModalItem.title}>
+                {rescheduleModalItem.title}
+              </span>
+              <p className="text-[11px] text-slate-500">
+                {rescheduleModalItem.scheduledTime ? (
+                  <span>
+                    Current Schedule: <strong className="text-purple-700">{new Date(rescheduleModalItem.scheduledTime).toLocaleString()}</strong>
+                  </span>
+                ) : (
+                  <span>Item is currently saved as a manual draft.</span>
+                )}
+              </p>
+            </div>
+
+            {/* Date & Time Picker */}
+            <div className="bg-purple-50/70 border border-purple-200/80 rounded-xl p-4 space-y-2">
+              <label className="text-xs font-bold text-purple-900 block flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-purple-600" />
+                New Scheduled Date & Time:
+              </label>
+              <input
+                type="datetime-local"
+                value={newScheduleDateTime}
+                min={new Date().toISOString().slice(0, 16)}
+                onChange={(e) => setNewScheduleDateTime(e.target.value)}
+                className="w-full px-3 py-2 border border-purple-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-purple-500 cursor-pointer shadow-2xs"
+              />
+              <span className="text-[10px] text-slate-500 block">
+                Listing will automatically go live on eBay when this date & time arrives.
+              </span>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              {rescheduleModalItem.scheduledTime ? (
+                <button
+                  type="button"
+                  disabled={savingSchedule}
+                  onClick={() => handleSaveReschedule(true)}
+                  className="text-xs text-rose-600 hover:text-rose-800 font-semibold px-2 py-1 rounded hover:bg-rose-50 transition cursor-pointer"
+                >
+                  Cancel Schedule (Keep Draft)
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRescheduleModalItem(null)}
+                  disabled={savingSchedule}
+                  className="px-3.5 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveReschedule(false)}
+                  disabled={savingSchedule || !newScheduleDateTime}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs transition disabled:opacity-50 cursor-pointer"
+                >
+                  {savingSchedule ? (
+                    <>
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Clock className="w-3 h-3" />
+                      <span>Save New Time</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -43,7 +43,16 @@ function ensureDataFile(): AppStore {
     if (fs.existsSync(DATA_FILE)) {
       const content = fs.readFileSync(DATA_FILE, 'utf-8');
       const parsed = JSON.parse(content);
-      if (parsed.accounts && parsed.activeAccountId) {
+      if (parsed.accounts && Array.isArray(parsed.accounts)) {
+        if (!parsed.masterConfig?.masterAppId && process.env.EBAY_MASTER_APP_ID) {
+          parsed.masterConfig = {
+            ...parsed.masterConfig,
+            masterAppId: process.env.EBAY_MASTER_APP_ID,
+            masterCertId: process.env.EBAY_MASTER_CERT_ID || '',
+            masterRuName: process.env.EBAY_MASTER_RU_NAME || '',
+            isLiveConfigured: true,
+          };
+        }
         return parsed;
       }
     }
@@ -107,7 +116,13 @@ export function getAccounts(): ConnectedAccount[] {
 
 export function getActiveAccountId(): string {
   const store = getStore();
-  return store.activeAccountId || (store.accounts[0]?.id ?? '');
+  if (!store.accounts || store.accounts.length === 0) return '';
+  const currentExists = store.accounts.some((a) => a.id === store.activeAccountId);
+  if (!currentExists) {
+    store.activeAccountId = store.accounts[0].id;
+    saveStore(store);
+  }
+  return store.activeAccountId;
 }
 
 export function setActiveAccountId(accountId: string): string {
@@ -154,8 +169,13 @@ export function connectNewAccount(params: {
 export function disconnectAccount(accountId: string): boolean {
   const store = getStore();
   store.accounts = store.accounts.filter((a) => a.id !== accountId);
-  if (store.activeAccountId === accountId && store.accounts.length > 0) {
-    store.activeAccountId = store.accounts[0].id;
+  // Clear all listings, orders, and messages associated with this disconnected account
+  store.listings = store.listings.filter((l) => l.accountId !== accountId);
+  store.orders = store.orders.filter((o) => o.accountId !== accountId);
+  store.threads = store.threads.filter((t) => t.accountId !== accountId);
+
+  if (store.activeAccountId === accountId) {
+    store.activeAccountId = store.accounts.length > 0 ? store.accounts[0].id : '';
   }
   saveStore(store);
   return true;
@@ -165,6 +185,9 @@ export function disconnectAccount(accountId: string): boolean {
 export function getListings(accountId?: string): EbayListing[] {
   const store = getStore();
   const targetAccount = accountId || store.activeAccountId;
+  if (!targetAccount || !store.accounts.some((a) => a.id === targetAccount)) {
+    return [];
+  }
   return store.listings.filter((l) => l.accountId === targetAccount);
 }
 
@@ -192,6 +215,9 @@ export function updateListing(id: string, updates: Partial<EbayListing>): EbayLi
     ...updates,
     lastUpdated: new Date().toISOString(),
   };
+  if (updates.scheduledTime === null) {
+    delete store.listings[index].scheduledTime;
+  }
   saveStore(store);
   return store.listings[index];
 }
@@ -224,6 +250,9 @@ export function clearAllListings(accountId?: string): number {
 export function getOrders(accountId?: string): EbayOrder[] {
   const store = getStore();
   const targetAccount = accountId || store.activeAccountId;
+  if (!targetAccount || !store.accounts.some((a) => a.id === targetAccount)) {
+    return [];
+  }
   return store.orders.filter((o) => o.accountId === targetAccount);
 }
 
@@ -247,6 +276,9 @@ export function fulfillOrder(orderId: string, trackingNumber: string, carrier: s
 export function getMessageThreads(accountId?: string): EbayMessageThread[] {
   const store = getStore();
   const targetAccount = accountId || store.activeAccountId;
+  if (!targetAccount || !store.accounts.some((a) => a.id === targetAccount)) {
+    return [];
+  }
   return store.threads.filter((t) => t.accountId === targetAccount);
 }
 
@@ -365,4 +397,104 @@ export function saveCategoryProfiles(profiles: MasterCategoryProfile[]): MasterC
   store.categoryProfiles = profiles;
   saveStore(store);
   return store.categoryProfiles;
+}
+
+// Master Description Find & Replace (From - To Editor)
+export function bulkReplaceListingDescription(params: {
+  accountId?: string;
+  fromText: string;
+  toText: string;
+  listingIds?: string[];
+  caseSensitive?: boolean;
+  dryRun?: boolean;
+}): {
+  updatedCount: number;
+  matchedCount: number;
+  totalChecked: number;
+  updatedListings: {
+    id: string;
+    sku: string;
+    title: string;
+    replacementsCount: number;
+    sampleBefore?: string;
+    sampleAfter?: string;
+  }[];
+} {
+  const store = getStore();
+  const targetAccountId = params.accountId || store.activeAccountId;
+  const { fromText, toText = '', listingIds, caseSensitive = false, dryRun = false } = params;
+
+  if (!fromText) {
+    return { updatedCount: 0, matchedCount: 0, totalChecked: 0, updatedListings: [] };
+  }
+
+  let candidates = store.listings;
+  if (targetAccountId) {
+    candidates = candidates.filter((l) => l.accountId === targetAccountId);
+  }
+  if (listingIds && listingIds.length > 0) {
+    const idSet = new Set(listingIds);
+    candidates = candidates.filter((l) => idSet.has(l.id));
+  }
+
+  let updatedCount = 0;
+  let matchedCount = 0;
+  const updatedListings: {
+    id: string;
+    sku: string;
+    title: string;
+    replacementsCount: number;
+    sampleBefore?: string;
+    sampleAfter?: string;
+  }[] = [];
+
+  const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const flags = caseSensitive ? 'g' : 'gi';
+  const regex = new RegExp(escapeRegExp(fromText), flags);
+
+  for (const listing of candidates) {
+    const originalDesc = listing.description || '';
+    if (!originalDesc) continue;
+
+    const matches = originalDesc.match(regex);
+    if (matches && matches.length > 0) {
+      matchedCount++;
+
+      // Create sample snippet showing context around first match
+      const firstIdx = originalDesc.search(regex);
+      const startSnippet = Math.max(0, firstIdx - 40);
+      const endSnippet = Math.min(originalDesc.length, firstIdx + fromText.length + 40);
+      const sampleBefore = (startSnippet > 0 ? '...' : '') + originalDesc.slice(startSnippet, endSnippet) + (endSnippet < originalDesc.length ? '...' : '');
+
+      const newDesc = originalDesc.replace(regex, toText);
+      const sampleAfter = sampleBefore.replace(regex, toText);
+
+      if (!dryRun) {
+        listing.description = newDesc;
+        listing.hasUnpublishedChanges = true;
+        listing.lastUpdated = new Date().toISOString();
+        updatedCount++;
+      }
+
+      updatedListings.push({
+        id: listing.id,
+        sku: listing.sku,
+        title: listing.title,
+        replacementsCount: matches.length,
+        sampleBefore,
+        sampleAfter,
+      });
+    }
+  }
+
+  if (!dryRun && updatedCount > 0) {
+    saveStore(store);
+  }
+
+  return {
+    updatedCount: dryRun ? matchedCount : updatedCount,
+    matchedCount,
+    totalChecked: candidates.length,
+    updatedListings,
+  };
 }
