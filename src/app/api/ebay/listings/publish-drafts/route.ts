@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getStore, saveStore, getActiveAccountId } from '@/lib/ebay/server-store';
+import { getStore, saveStore, getActiveAccountId, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
 import { addLiveEbayListing, reviseLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 import { isVideoMedia } from '@/lib/ebay/template-engine';
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json().catch(() => ({}));
     const targetAccountId = body.accountId || getActiveAccountId();
     const store = getStore();
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
       }
     }
 
-    saveStore(store);
+    await saveStoreAsync(store);
 
     const successCount = results.filter((r) => r.success).length;
 

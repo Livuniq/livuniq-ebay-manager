@@ -1,5 +1,16 @@
 import { NextResponse } from 'next/server';
-import { getListings, createListing, updateListing, deleteListing, clearAllListings, getActiveAccountId, getAccounts, ensureStoreAsync } from '@/lib/ebay/server-store';
+import {
+  getListings,
+  createListing,
+  updateListing,
+  deleteListing,
+  clearAllListings,
+  getActiveAccountId,
+  getAccounts,
+  ensureStoreAsync,
+  getStore,
+  saveStoreAsync,
+} from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing, addLiveEbayListing, endLiveEbayListing } from '@/lib/ebay/live-sync';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
 
@@ -110,6 +121,8 @@ export async function POST(request: Request) {
       hasUnpublishedChanges: !shouldPublishToEbay || ebayLiveStatus !== 'LIVE_CREATED',
       lastSyncedWithEbayAt: ebayLiveStatus === 'LIVE_CREATED' ? new Date().toISOString() : undefined,
     });
+
+    await saveStoreAsync(getStore());
 
     return NextResponse.json({
       success: true,
@@ -345,6 +358,8 @@ export async function PATCH(request: Request) {
       }
     }
 
+    await saveStoreAsync(getStore());
+
     return NextResponse.json({
       success: true,
       listing: currentListing,
@@ -394,6 +409,7 @@ export async function DELETE(request: Request) {
       }
 
       const clearedCount = clearAllListings(scope === 'current' && targetAccId ? targetAccId : undefined);
+      await saveStoreAsync(getStore());
       return NextResponse.json({
         success: true,
         clearedCount,
@@ -413,6 +429,7 @@ export async function DELETE(request: Request) {
     }
 
     const deleted = deleteListing(id);
+    await saveStoreAsync(getStore());
     return NextResponse.json({ success: deleted });
   } catch (err) {
     return NextResponse.json(

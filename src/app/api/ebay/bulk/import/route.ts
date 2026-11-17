@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStore, getActiveAccountId, createListing } from '@/lib/ebay/server-store';
+import { getStore, getActiveAccountId, createListing, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
 import { addLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
 import { isVideoMedia } from '@/lib/ebay/template-engine';
@@ -30,6 +30,7 @@ export interface BulkImportItemPayload {
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
     const { items, accountId, publishToEbay, publishMode = (publishToEbay ? 'NOW' : 'DRAFT'), scheduledTime } = body;
 
@@ -163,6 +164,8 @@ export async function POST(request: Request) {
 
     const successCount = results.filter((r) => r.success).length;
     const failureCount = results.length - successCount;
+
+    await saveStoreAsync(store);
 
     return NextResponse.json({
       success: true,
