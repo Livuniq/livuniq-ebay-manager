@@ -1968,86 +1968,107 @@ export default function Home() {
               </div>
 
               {/* Stores Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {accounts.map((acc) => (
-                  <div
-                    key={acc.id}
-                    className={`bg-white rounded-xl border p-5 shadow-sm space-y-4 transition ${
-                      acc.id === activeAccountId
-                        ? 'border-blue-500 ring-2 ring-blue-500/20'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
+              {accounts.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-4 shadow-sm">
+                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mx-auto">
+                    <Store className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-800">No eBay Stores Connected</h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                      Aapka koi eBay store connected nahi hai. Naya official eBay account jodne ke liye button par click karein.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowConnectModal(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold inline-flex items-center space-x-2 shadow-sm transition cursor-pointer"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-3">
-                        <img
-                          src={acc.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${acc.ebayUsername}`}
-                          alt=""
-                          className="w-12 h-12 rounded-xl object-cover border border-slate-200"
-                        />
+                    <Plus className="w-4 h-4" />
+                    <span>Connect Official eBay Account</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {accounts.map((acc) => (
+                    <div
+                      key={acc.id}
+                      className={`bg-white rounded-xl border p-5 shadow-sm space-y-4 transition ${
+                        acc.id === activeAccountId
+                          ? 'border-blue-500 ring-2 ring-blue-500/20'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center space-x-3">
+                          <img
+                            src={acc.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${acc.ebayUsername}`}
+                            alt=""
+                            className="w-12 h-12 rounded-xl object-cover border border-slate-200"
+                          />
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <span className="font-bold text-sm text-slate-900">{acc.storeName}</span>
+                              {acc.id === activeAccountId && (
+                                <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                  Active Store
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">
+                              Username: <span className="font-semibold text-slate-700">{acc.ebayUsername}</span> • {acc.marketplace}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center space-x-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span>Connected</span>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg text-xs">
                         <div>
-                          <div className="flex items-center space-x-2">
-                            <span className="font-bold text-sm text-slate-900">{acc.storeName}</span>
-                            {acc.id === activeAccountId && (
-                              <span className="bg-blue-100 text-blue-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                Active Store
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-slate-500 mt-0.5">
-                            Username: <span className="font-semibold text-slate-700">{acc.ebayUsername}</span> • {acc.marketplace}
-                          </div>
+                          <span className="text-slate-400 block text-[10px]">Seller Level</span>
+                          <span className="font-semibold text-slate-800">{acc.sellerLevel}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Currency</span>
+                          <span className="font-semibold text-slate-800">{acc.currency}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">OAuth Token Life</span>
+                          <span className="font-semibold text-emerald-600">Valid (18 Months)</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[10px]">Last Synced</span>
+                          <span className="font-semibold text-slate-700">{new Date(acc.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
                       </div>
 
-                      <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center space-x-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span>Connected</span>
-                      </span>
-                    </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                        {acc.id !== activeAccountId ? (
+                          <button
+                            onClick={() => handleSwitchAccount(acc.id)}
+                            className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer"
+                          >
+                            Switch To This Store
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-500 font-medium">Currently viewing this store</span>
+                        )}
 
-                    <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg text-xs">
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Seller Level</span>
-                        <span className="font-semibold text-slate-800">{acc.sellerLevel}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Currency</span>
-                        <span className="font-semibold text-slate-800">{acc.currency}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">OAuth Token Life</span>
-                        <span className="font-semibold text-emerald-600">Valid (18 Months)</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[10px]">Last Synced</span>
-                        <span className="font-semibold text-slate-700">{new Date(acc.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                      {acc.id !== activeAccountId ? (
                         <button
-                          onClick={() => handleSwitchAccount(acc.id)}
-                          className="bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer"
+                          onClick={() => handleDisconnect(acc.id)}
+                          className="text-xs text-rose-600 hover:text-rose-800 font-semibold flex items-center space-x-1 cursor-pointer"
                         >
-                          Switch To This Store
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Disconnect</span>
                         </button>
-                      ) : (
-                        <span className="text-xs text-slate-500 font-medium">Currently viewing this store</span>
-                      )}
-
-                      <button
-                        onClick={() => handleDisconnect(acc.id)}
-                        className="text-xs text-rose-600 hover:text-rose-800 font-semibold flex items-center space-x-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Disconnect</span>
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

@@ -32,10 +32,20 @@ interface AppStore {
   categoryProfiles?: MasterCategoryProfile[];
 }
 
-const DATA_DIR = path.join(process.cwd(), '.data');
-const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
+const isVercel = Boolean(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.NOW_REGION
+);
+export const DATA_DIR = isVercel ? path.join('/tmp', '.data') : path.join(process.cwd(), '.data');
+export const DATA_FILE = path.join(DATA_DIR, 'ebay_state.json');
+
+let memoryStore: AppStore | null = null;
 
 function ensureDataFile(): AppStore {
+  if (memoryStore) {
+    return memoryStore;
+  }
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -53,6 +63,7 @@ function ensureDataFile(): AppStore {
             isLiveConfigured: true,
           };
         }
+        memoryStore = parsed;
         return parsed;
       }
     }
@@ -62,23 +73,28 @@ function ensureDataFile(): AppStore {
 
   const defaultStore: AppStore = {
     masterConfig: initialMasterConfig,
-    activeAccountId: initialAccounts[0].id,
+    activeAccountId: initialAccounts.length > 0 ? initialAccounts[0].id : '',
     accounts: initialAccounts,
     listings: initialListings,
     orders: initialOrders,
     threads: initialThreads,
   };
 
+  memoryStore = defaultStore;
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
     fs.writeFileSync(DATA_FILE, JSON.stringify(defaultStore, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Error writing default eBay store file', err);
+    // ignore on read-only environments
   }
 
   return defaultStore;
 }
 
 export function saveStore(store: AppStore) {
+  memoryStore = store;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
