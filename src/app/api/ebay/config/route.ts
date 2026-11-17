@@ -3,6 +3,15 @@ import { getMasterConfig, updateMasterConfig } from '@/lib/ebay/server-store';
 
 export async function GET() {
   const masterConfig = getMasterConfig();
+  if (!masterConfig.masterAppId && process.env.EBAY_MASTER_APP_ID) {
+    masterConfig.masterAppId = process.env.EBAY_MASTER_APP_ID;
+    masterConfig.masterCertId = process.env.EBAY_MASTER_CERT_ID || '';
+    masterConfig.masterRuName = process.env.EBAY_MASTER_RU_NAME || '';
+    masterConfig.isLiveConfigured = true;
+    masterConfig.environment = process.env.EBAY_MASTER_APP_ID.includes('-SBX-')
+      ? 'sandbox'
+      : masterConfig.environment || 'sandbox';
+  }
   return NextResponse.json({
     success: true,
     config: masterConfig,

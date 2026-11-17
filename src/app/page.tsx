@@ -180,11 +180,43 @@ export default function Home() {
       ]);
 
       if (cfgData.success) {
-        setMasterConfig(cfgData.config);
-        setMasterAppId(cfgData.config.masterAppId || '');
-        setMasterCertId(cfgData.config.masterCertId || '');
-        setMasterRuName(cfgData.config.masterRuName || '');
-        setMasterEnv(cfgData.config.environment || 'demo');
+        let localCfg: any = null;
+        try {
+          const cached = localStorage.getItem('ebay_master_config');
+          if (cached) localCfg = JSON.parse(cached);
+        } catch (e) {}
+
+        const finalAppId = cfgData.config.masterAppId || localCfg?.masterAppId || '';
+        const finalCertId = cfgData.config.masterCertId || localCfg?.masterCertId || '';
+        const finalRuName = cfgData.config.masterRuName || localCfg?.masterRuName || '';
+        const finalEnv =
+          cfgData.config.environment ||
+          localCfg?.environment ||
+          (finalAppId.includes('-SBX-') ? 'sandbox' : 'sandbox');
+
+        const resolvedConfig = {
+          ...cfgData.config,
+          masterAppId: finalAppId,
+          masterCertId: finalCertId,
+          masterRuName: finalRuName,
+          environment: finalEnv,
+          isLiveConfigured: Boolean(finalAppId && finalRuName),
+        };
+
+        setMasterConfig(resolvedConfig);
+        setMasterAppId(finalAppId);
+        setMasterCertId(finalCertId);
+        setMasterRuName(finalRuName);
+        setMasterEnv(finalEnv);
+
+        // Auto sync to backend if backend was empty but client had keys
+        if (!cfgData.config.masterAppId && finalAppId) {
+          fetch('/api/ebay/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(resolvedConfig),
+          }).catch(console.error);
+        }
       }
 
       if (listData.success) setListings(listData.listings);
@@ -204,6 +236,28 @@ export default function Home() {
       setRefreshing(false);
     }
   };
+
+  // Instant client-side restore from localStorage before network completes
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('ebay_master_config');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.masterAppId) setMasterAppId(parsed.masterAppId);
+        if (parsed.masterCertId) setMasterCertId(parsed.masterCertId);
+        if (parsed.masterRuName) setMasterRuName(parsed.masterRuName);
+        if (parsed.environment) setMasterEnv(parsed.environment);
+        setMasterConfig((prev) => ({
+          masterAppId: parsed.masterAppId,
+          masterCertId: parsed.masterCertId || '',
+          masterRuName: parsed.masterRuName || '',
+          environment: parsed.environment || 'sandbox',
+          isLiveConfigured: Boolean(parsed.masterAppId && parsed.masterRuName),
+          ...prev,
+        }));
+      }
+    } catch (e) {}
+  }, []);
 
   useEffect(() => {
     fetchAccountsAndData();
@@ -751,6 +805,19 @@ export default function Home() {
     e.preventDefault();
     setSavingSettings(true);
     setSettingsSuccess(false);
+
+    try {
+      localStorage.setItem(
+        'ebay_master_config',
+        JSON.stringify({
+          masterAppId,
+          masterCertId,
+          masterRuName,
+          environment: masterEnv,
+        })
+      );
+    } catch (e) {}
+
     try {
       const res = await fetch('/api/ebay/config', {
         method: 'POST',
