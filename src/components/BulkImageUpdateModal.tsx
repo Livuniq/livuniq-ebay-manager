@@ -157,15 +157,22 @@ export default function BulkImageUpdateModal({
     setScanProgress({ current: 0, total: files.length });
 
     try {
-      const rawGroups: Record<string, { folderName: string; files: Array<{ file: File; relPath: string }> }> = {};
+      const rawGroups: Record<
+        string,
+        {
+          folderName: string;
+          files: Array<{ file: File; relPath: string }>;
+          videoFile?: { file: File; relPath: string };
+        }
+      > = {};
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         setScanProgress({ current: i + 1, total: files.length });
 
-        // Skip non-image files (videos, ds_store, thumbs.db, etc.)
+        const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi)$/i.test(file.name);
         const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|avif|gif)$/i.test(file.name);
-        if (!isImage) continue;
+        if (!isImage && !isVideo) continue;
 
         const relPath = (file as any).webkitRelativePath || file.name;
         const normalized = relPath.replace(/\\/g, '/');
@@ -193,11 +200,18 @@ export default function BulkImageUpdateModal({
             files: [],
           };
         }
-        // Deduplicate within the group by filename
-        const fileBaseName = file.name.toLowerCase();
-        const alreadyHasFile = rawGroups[groupKey].files.some((f) => f.file.name.toLowerCase() === fileBaseName);
-        if (!alreadyHasFile) {
-          rawGroups[groupKey].files.push({ file, relPath });
+
+        if (isVideo) {
+          if (!rawGroups[groupKey].videoFile) {
+            rawGroups[groupKey].videoFile = { file, relPath };
+          }
+        } else {
+          // Deduplicate within the group by filename
+          const fileBaseName = file.name.toLowerCase();
+          const alreadyHasFile = rawGroups[groupKey].files.some((f) => f.file.name.toLowerCase() === fileBaseName);
+          if (!alreadyHasFile) {
+            rawGroups[groupKey].files.push({ file, relPath });
+          }
         }
       }
 
@@ -270,11 +284,36 @@ export default function BulkImageUpdateModal({
           return lSku === cleanSku || (alphaNumSku.length >= 3 && lAlphaNum === alphaNumSku);
         }) || null;
 
+        let groupVideoUrl: string | undefined = undefined;
+        if (item.videoFile) {
+          try {
+            const vidFormData = new FormData();
+            vidFormData.append('files', item.videoFile.file);
+            vidFormData.append('relativePaths', item.videoFile.relPath);
+            if (activeAccount?.id) {
+              vidFormData.append('accountId', activeAccount.id);
+            }
+            const vRes = await fetch('/api/upload', {
+              method: 'POST',
+              body: vidFormData,
+            });
+            if (vRes.ok) {
+              const vData = await vRes.json();
+              if (vData.success && vData.files && vData.files.length > 0) {
+                groupVideoUrl = vData.files[0].url;
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
         builtGroups.push({
           sku: matched ? matched.sku : item.folderName,
           folderName: item.folderName,
           matchedListing: matched,
           files: stagedFiles,
+          videoUrl: groupVideoUrl,
           selected: Boolean(matched),
         });
       }
@@ -431,6 +470,7 @@ export default function BulkImageUpdateModal({
           images: cleanNewUrls,
           imageUrl: cleanNewUrls[0] || existing.imageUrl,
           videoUrl: g.videoUrl || existing.videoUrl,
+          videoId: serverResult?.videoId || existing.videoId,
           description: updatedDesc,
           hasUnpublishedChanges: !pushLiveToEbay,
           lastUpdated: new Date().toISOString(),

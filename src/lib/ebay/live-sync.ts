@@ -574,6 +574,118 @@ function extractEbayErrorMessage(respText: string, defaultMsg = 'eBay request re
   return generalMatch ? decodeXmlEntities(generalMatch[1]) : defaultMsg;
 }
 
+// Upload a video (buffer or remote URL like Google Drive) directly to eBay Media API (commerce/media/v1_beta/video)
+export async function uploadVideoToEbayMediaApi(
+  account: ConnectedAccount,
+  videoInput: string | Buffer,
+  fileName = 'product_video.mp4'
+): Promise<{ success: boolean; videoId?: string; error?: string }> {
+  try {
+    const store = getStore();
+    const accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
+    if (!accessToken) {
+      return { success: false, error: 'No eBay access token for active seller' };
+    }
+
+    let videoBuffer: Buffer;
+    if (typeof videoInput === 'string') {
+      const cleanUrl = videoInput.trim();
+      if (!cleanUrl) return { success: false, error: 'Empty video URL' };
+
+      // Handle relative local upload paths (e.g. /uploads/videos/xyz.mp4)
+      if (cleanUrl.startsWith('/uploads/')) {
+        const localPath = path.join(process.cwd(), 'public', cleanUrl);
+        if (fs.existsSync(localPath)) {
+          videoBuffer = fs.readFileSync(localPath);
+        } else {
+          return { success: false, error: 'Local video file not found on disk' };
+        }
+      } else {
+        // Fetch remote video stream (Google Drive, Cloud Storage, etc.)
+        const fetchRes = await fetch(cleanUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+        });
+        if (!fetchRes.ok) {
+          return { success: false, error: `Failed to download video from URL (HTTP ${fetchRes.status})` };
+        }
+        const arrayBuf = await fetchRes.arrayBuffer();
+        videoBuffer = Buffer.from(arrayBuf);
+      }
+    } else {
+      videoBuffer = videoInput;
+    }
+
+    if (!videoBuffer || videoBuffer.length === 0) {
+      return { success: false, error: 'Video buffer is empty' };
+    }
+
+    const masterConfig = store.masterConfig;
+    const videoBaseUrl = isSandboxEnv(masterConfig)
+      ? 'https://api.sandbox.ebay.com/commerce/media/v1_beta/video'
+      : 'https://api.ebay.com/commerce/media/v1_beta/video';
+
+    const cleanTitle = fileName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50) || 'Product_Video';
+
+    console.log(`[eBay Media API] Registering video metadata: ${cleanTitle}, size: ${videoBuffer.length} bytes`);
+
+    // Step 1: Create Video Metadata
+    const createRes = await fetch(videoBaseUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        title: cleanTitle,
+        size: videoBuffer.length,
+        classification: ['ITEM'],
+        description: 'Product Diamond Video',
+      }),
+    });
+
+    const locationHeader = createRes.headers.get('location');
+    if (!locationHeader) {
+      const errText = await createRes.text();
+      console.warn('[eBay Media API] createVideo failed:', createRes.status, errText);
+      return { success: false, error: `eBay createVideo returned HTTP ${createRes.status}: ${errText.slice(0, 150)}` };
+    }
+
+    const videoId = locationHeader.split('/').pop();
+    if (!videoId) {
+      return { success: false, error: 'Could not extract videoId from eBay location header' };
+    }
+
+    console.log(`[eBay Media API] Uploading binary video content to eBay for videoId: ${videoId}`);
+
+    // Step 2: Upload Binary Video Payload
+    const uploadRes = await fetch(`${videoBaseUrl}/${videoId}/upload`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': videoBuffer.length.toString(),
+        'Content-Range': `bytes 0-${videoBuffer.length - 1}/${videoBuffer.length}`,
+      },
+      body: new Uint8Array(videoBuffer),
+    });
+
+    if (uploadRes.status === 200 || uploadRes.status === 204) {
+      console.log(`[eBay Media API] Successfully uploaded video to eBay! VideoID: ${videoId}`);
+      return { success: true, videoId };
+    } else {
+      const errTxt = await uploadRes.text();
+      console.warn(`[eBay Media API] Video upload non-200 (HTTP ${uploadRes.status}):`, errTxt);
+      return { success: false, error: `eBay video upload returned HTTP ${uploadRes.status}: ${errTxt.slice(0, 150)}` };
+    }
+  } catch (err: any) {
+    console.error('[eBay Media API] Video upload error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
 // 5. Update/Revise a Live Listing directly on eBay Servers via ReviseFixedPriceItem
 export async function reviseLiveEbayListing(
   account: ConnectedAccount,
@@ -602,7 +714,7 @@ export async function reviseLiveEbayListing(
     locationPostalCode?: string;
     locationCityState?: string;
   }
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; videoId?: string }> {
   const store = getStore();
   const accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
   const masterConfig = store.masterConfig;
@@ -709,8 +821,24 @@ export async function reviseLiveEbayListing(
       </ItemSpecifics>`;
     }
   }
-  if (updates.videoId) {
-    itemXmlFields += `<VideoDetails><VideoID>${updates.videoId}</VideoID></VideoDetails>`;
+  let effectiveVideoId = updates.videoId;
+  if (!effectiveVideoId && updates.videoUrl) {
+    try {
+      console.log(`[eBay Video] Auto-uploading video from URL to eBay Media API for Item ${itemId}...`);
+      const vidRes = await uploadVideoToEbayMediaApi(account, updates.videoUrl, `video_${updates.sku || itemId}.mp4`);
+      if (vidRes.success && vidRes.videoId) {
+        effectiveVideoId = vidRes.videoId;
+        console.log(`[eBay Video] Video uploaded to eBay Media API successfully! VideoID: ${effectiveVideoId}`);
+      } else {
+        console.warn('[eBay Video] Auto-upload video to eBay Media API failed:', vidRes.error);
+      }
+    } catch (vErr) {
+      console.warn('[eBay Video] Auto-upload video exception:', vErr);
+    }
+  }
+
+  if (effectiveVideoId) {
+    itemXmlFields += `<VideoDetails><VideoID>${effectiveVideoId}</VideoID></VideoDetails>`;
   }
   if (
     updates.shippingPolicyId ||
@@ -812,7 +940,7 @@ export async function reviseLiveEbayListing(
       respText.includes('<Ack>Warning</Ack>');
 
     if (isSuccess) {
-      return { success: true, message: 'Changes successfully published live to eBay marketplace!' };
+      return { success: true, message: 'Changes successfully published live to eBay marketplace!', videoId: effectiveVideoId };
     } else {
       const errMsg = extractEbayErrorMessage(respText, 'eBay ReviseItem returned error');
       return { success: false, message: errMsg };

@@ -150,10 +150,15 @@ export async function POST(request: Request) {
 
           if (reviseRes.success) {
             pushedToEbay = true;
+            if (reviseRes.videoId) {
+              listing.videoId = reviseRes.videoId;
+            }
             listing.hasUnpublishedChanges = false;
             listing.lastSyncedWithEbayAt = new Date().toISOString();
             listing.status = (listing.quantity !== undefined && listing.quantity !== null ? listing.quantity : 0) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
-            ebayMessage = 'Live on eBay updated successfully!';
+            ebayMessage = reviseRes.videoId
+              ? 'Live on eBay updated successfully with Video!'
+              : 'Live on eBay updated successfully!';
           } else {
             ebayMessage = `eBay live sync failed: ${reviseRes.message}`;
           }
