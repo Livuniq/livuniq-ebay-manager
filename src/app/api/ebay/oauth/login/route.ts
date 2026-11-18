@@ -24,6 +24,7 @@ export async function GET(request: Request) {
     'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
     'https://api.ebay.com/oauth/api_scope/commerce.message',
     'https://api.ebay.com/oauth/api_scope/sell.account',
+    'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
   ].join(' ');
 
   const authHost = isSandbox

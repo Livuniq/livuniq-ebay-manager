@@ -97,6 +97,7 @@ export default function EditListingModal({
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('');
+  const [views, setViews] = useState('0');
   const [sku, setSku] = useState('');
   const [sellerNotes, setSellerNotes] = useState('');
   const [images, setImages] = useState<string[]>([]);
@@ -151,6 +152,7 @@ export default function EditListingModal({
       setTitle(listing.title || '');
       setPrice(listing.price !== undefined && listing.price !== null ? listing.price.toString() : '');
       setQuantity(listing.quantity !== undefined && listing.quantity !== null ? listing.quantity.toString() : '0');
+      setViews(listing.views !== undefined && listing.views !== null ? listing.views.toString() : '0');
       setSku(listing.sku || '');
       setSellerNotes(listing.sellerNotes || 'New with packaging, original box & tag included.');
       setCategory(listing.category || EBAY_JEWELRY_CATEGORIES[0].path);
@@ -424,6 +426,7 @@ export default function EditListingModal({
           title: title.trim(),
           price: parseFloat(price) || 0,
           quantity: isNaN(parseInt(quantity)) ? 0 : parseInt(quantity),
+          views: parseInt(views) || 0,
           sku: sku.trim(),
           images,
           videoUrl,
@@ -608,7 +611,7 @@ export default function EditListingModal({
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div>
                   <label className="font-bold text-slate-800 block mb-1">Price (USD) *</label>
                   <div className="relative">
@@ -635,6 +638,26 @@ export default function EditListingModal({
                     onChange={(e) => setQuantity(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-800 block mb-1 flex items-center justify-between">
+                    <span>Page Views</span>
+                    <span className="text-[10px] text-blue-600 font-normal">eBay Analytics</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-slate-400">
+                      <Eye className="w-3.5 h-3.5 text-blue-500" />
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={views}
+                      onChange={(e) => setViews(e.target.value)}
+                      placeholder="0"
+                      className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
                 </div>
 
                 <div>

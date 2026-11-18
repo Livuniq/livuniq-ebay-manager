@@ -169,6 +169,8 @@ export async function PATCH(request: Request) {
       if (updates.quantity === 0) updates.status = 'OUT_OF_STOCK';
       else if (updates.quantity > 0 && updates.status === 'OUT_OF_STOCK') updates.status = 'ACTIVE';
     }
+    if (updates.views !== undefined) updates.views = parseInt(updates.views) || 0;
+    if (updates.watchers !== undefined) updates.watchers = parseInt(updates.watchers) || 0;
 
     if (updates.images && Array.isArray(updates.images)) {
       updates.images = deduplicateImageUrls(updates.images);

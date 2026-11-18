@@ -89,6 +89,63 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
   return account.accessToken;
 }
 
+export async function fetchEbayTrafficReport(
+  accessToken: string,
+  environment: string,
+  itemIds: string[]
+): Promise<Record<string, number>> {
+  const viewsMap: Record<string, number> = {};
+  if (!itemIds || itemIds.length === 0 || !accessToken) return viewsMap;
+
+  try {
+    const baseUrl =
+      environment === 'sandbox'
+        ? 'https://api.sandbox.ebay.com/sell/analytics/v1/traffic_report'
+        : 'https://api.ebay.com/sell/analytics/v1/traffic_report';
+
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 30);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const fmt = (d: Date) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+    const dateRange = `[${fmt(start)}..${fmt(end)}]`;
+
+    const filter = `date_range:${dateRange}`;
+    const url = `${baseUrl}?dimension=LISTING&filter=${encodeURIComponent(filter)}&metric=LISTING_VIEWS_TOTAL`;
+
+    console.log('[eBay Analytics API] Requesting traffic report for views:', url);
+
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log('[eBay Analytics API] Traffic report records received:', data.records?.length || 0);
+      if (data.records && Array.isArray(data.records)) {
+        for (const rec of data.records) {
+          const lId = rec.dimensionValues?.[0]?.value;
+          const viewCount = rec.metricValues?.[0]?.value;
+          if (lId && typeof viewCount === 'number') {
+            viewsMap[lId] = viewCount;
+          }
+        }
+      }
+    } else {
+      const errText = await res.text();
+      console.warn('[eBay Analytics API] Traffic report non-200:', res.status, errText);
+    }
+  } catch (err) {
+    console.error('[eBay Analytics API] Traffic report exception:', err);
+  }
+
+  return viewsMap;
+}
+
 export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
   syncedListings: number;
   syncedOrders: number;
@@ -402,6 +459,21 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
     } catch (enrichErr) {
       console.error('Error enriching item details from eBay GetItem:', enrichErr);
     }
+  }
+
+  // 4b. Fetch real-time listing views from eBay Analytics API (Traffic Report)
+  try {
+    const liveIds = fetchedListings.map((it) => it.ebayListingId).filter(Boolean) as string[];
+    if (liveIds.length > 0) {
+      const trafficViews = await fetchEbayTrafficReport(accessToken, masterConfig.environment, liveIds);
+      for (const item of fetchedListings) {
+        if (item.ebayListingId && trafficViews[item.ebayListingId] !== undefined) {
+          item.views = trafficViews[item.ebayListingId];
+        }
+      }
+    }
+  } catch (trafficErr) {
+    console.warn('[Analytics API] Non-fatal traffic views sync notice:', trafficErr);
   }
 
   // 5. Update listings in store
