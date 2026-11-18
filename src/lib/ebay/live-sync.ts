@@ -1,7 +1,7 @@
 import { getStore, saveStore, saveStoreAsync } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
-import { isVideoMedia, cleanAndDecodeDescription } from './template-engine';
+import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml } from './template-engine';
 import fs from 'fs';
 import path from 'path';
 
@@ -532,7 +532,8 @@ export async function reviseLiveEbayListing(
     itemXmlFields += `<ConditionID>${updates.conditionId}</ConditionID>`;
   }
   if (updates.description) {
-    itemXmlFields += `<Description><![CDATA[${updates.description}]]></Description>`;
+    const cleanDesc = sanitizeGalleryHtml(updates.description);
+    itemXmlFields += `<Description><![CDATA[${cleanDesc}]]></Description>`;
   }
   if (updates.conditionDescription) {
     itemXmlFields += `<ConditionDescription><![CDATA[${updates.conditionDescription}]]></ConditionDescription>`;
@@ -800,7 +801,7 @@ export async function addLiveEbayListing(
   <WarningLevel>High</WarningLevel>
   <Item>
     <Title><![CDATA[${listing.title.slice(0, 80)}]]></Title>
-    <Description><![CDATA[${listing.description || listing.title}]]></Description>
+    <Description><![CDATA[${sanitizeGalleryHtml(listing.description || listing.title)}]]></Description>
     <PrimaryCategory>
       <CategoryID>${listing.categoryId || '92911'}</CategoryID>
     </PrimaryCategory>

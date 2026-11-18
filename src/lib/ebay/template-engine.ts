@@ -124,13 +124,27 @@ export function generateRadioGalleryHtml(images: string[] = []): string {
 ${activeSelectors} { display: block !important; }
 #gallBlock .imgLgIn img { max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
-/* Suppress any inherited ::before / ::after pseudo-elements (e.g. from .clearfix) so they never become empty ghost grid items in CSS Grid */
+/* Suppress any inherited ::before / ::after pseudo-elements (e.g. from .clearfix) on both gallBlock and gallThumbs so they never create ghost blocks */
+#tmpShell #gallBlock::before,
+#tmpShell #gallBlock::after,
+#tmpShell #gallBlock:before,
+#tmpShell #gallBlock:after,
+#gallBlock::before,
+#gallBlock::after,
+#gallBlock:before,
+#gallBlock:after,
 #tmpShell #gallBlock #gallThumbs::before,
 #tmpShell #gallBlock #gallThumbs::after,
+#tmpShell #gallBlock #gallThumbs:before,
+#tmpShell #gallBlock #gallThumbs:after,
 #gallBlock #gallThumbs::before,
 #gallBlock #gallThumbs::after,
+#gallBlock #gallThumbs:before,
+#gallBlock #gallThumbs:after,
 #gallThumbs::before,
-#gallThumbs::after {
+#gallThumbs::after,
+#gallThumbs:before,
+#gallThumbs:after {
   content: none !important;
   display: none !important;
   width: 0 !important;
@@ -218,7 +232,7 @@ ${activeThumbSelectors} {
   box-shadow: 0 0 0 1.5px #631726, 0 3px 8px rgba(99, 23, 38, 0.22) !important;
 }
 </style>
-<div class="clearfix" id="gallBlock">
+<div id="gallBlock">
 ${radios}
 ${largeImages}
       <div class="clear"><br /></div>
@@ -250,6 +264,27 @@ function formatFloat2Decimals(val: any, forceWeight = false): string {
   return str;
 }
 
+// Sanitize HTML by permanently stripping any legacy .clearfix classes from gallery containers
+export function sanitizeGalleryHtml(html: string): string {
+  if (!html || typeof html !== 'string') return '';
+  let cleaned = html;
+
+  // 1. Remove class="clearfix" or clearfix from #gallBlock
+  cleaned = cleaned.replace(/<div([^>]*id=["']gallBlock["'][^>]*)class=["'][^"']*clearfix[^"']*["']([^>]*)>/gi, '<div$1$2>');
+  cleaned = cleaned.replace(/<div\s+class=["'][^"']*clearfix[^"']*["']([^>]*id=["']gallBlock["'][^>]*)>/gi, '<div$1>');
+
+  // 2. Remove class="clearfix" or clearfix from #gallThumbs
+  cleaned = cleaned.replace(/<div([^>]*id=["']gallThumbs["'][^>]*)class=["'][^"']*clearfix[^"']*["']([^>]*)>/gi, '<div$1 class="gallThumbsGrid"$2>');
+  cleaned = cleaned.replace(/<div\s+class=["'][^"']*clearfix[^"']*["']([^>]*id=["']gallThumbs["'][^>]*)>/gi, '<div class="gallThumbsGrid"$1>');
+
+  // 3. Clean up any empty class attributes or double spaces
+  cleaned = cleaned.replace(/<div\s+id=["']gallBlock["']\s+class=["']\s*["']([^>]*)>/gi, '<div id="gallBlock"$1>');
+  cleaned = cleaned.replace(/<div\s+class=["']\s*["']\s+id=["']gallBlock["']([^>]*)>/gi, '<div id="gallBlock"$1>');
+  cleaned = cleaned.replace(/<div\s+id=["']gallBlock["']\s*>/gi, '<div id="gallBlock">');
+
+  return cleaned;
+}
+
 export function cleanAndDecodeDescription(rawDesc?: string | null): string {
   if (!rawDesc || typeof rawDesc !== 'string') return '';
   let str = rawDesc.trim();
@@ -273,7 +308,7 @@ export function cleanAndDecodeDescription(rawDesc?: string | null): string {
       .replace(/&amp;/g, '&');
   }
 
-  return str.trim();
+  return sanitizeGalleryHtml(str.trim());
 }
 
 // Main Template Interpolation Engine
@@ -429,9 +464,7 @@ export function renderDescriptionTemplate(templateHtml: string, data: ListingTem
     return match;
   });
 
-  return output;
-
-  return output;
+  return sanitizeGalleryHtml(output);
 }
 
 // Built-in Luxury Jewelry Presets
@@ -602,5 +635,5 @@ export function updateDescriptionImages(
     updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), replacement);
   }
 
-  return updated;
+  return sanitizeGalleryHtml(updated);
 }

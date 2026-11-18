@@ -32,6 +32,7 @@ import {
   ListingTemplateData,
   renderDescriptionTemplate,
   DEFAULT_TEMPLATES,
+  sanitizeGalleryHtml,
 } from '@/lib/ebay/template-engine';
 import { MasterCategoryProfile, DEFAULT_CATEGORY_PROFILES } from '@/lib/ebay/specifics-rules';
 
@@ -325,7 +326,7 @@ export default function MasterHtmlTemplates({
         accountId: selectedAccountId,
         name: formName.trim(),
         description: formDescription.trim(),
-        html: formHtml,
+        html: sanitizeGalleryHtml(formHtml),
         mappedCategories: formMappedCategories,
       };
       if (editingTemplateId) {
