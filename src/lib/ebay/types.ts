@@ -135,4 +135,5 @@ export interface MasterAppConfig {
   productionAppId?: string;
   productionCertId?: string;
   productionRuName?: string;
+  googleDriveApiKey?: string;
 }

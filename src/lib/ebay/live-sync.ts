@@ -590,6 +590,7 @@ export async function reviseLiveEbayListing(
     categoryId?: string;
     conditionId?: string;
     videoId?: string;
+    videoUrl?: string;
     shippingPolicyId?: string;
     shippingPolicyName?: string;
     returnPolicyId?: string;

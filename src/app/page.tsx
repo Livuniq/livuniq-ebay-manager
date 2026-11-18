@@ -1601,10 +1601,10 @@ export default function Home() {
                   <button
                     onClick={() => setShowBulkImageModal(true)}
                     className="flex items-center space-x-1.5 bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
-                    title="Select photo folder to automatically match SKU, remove all old images and replace with new images"
+                    title="Folder ya Google Drive link se SKU match karke images & video replace karein"
                   >
                     <Camera className="w-3.5 h-3.5" />
-                    <span>Update Images (by SKU)</span>
+                    <span>Update Media / GDrive (by SKU)</span>
                   </button>
 
                   <button

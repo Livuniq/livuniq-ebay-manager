@@ -18,6 +18,10 @@ import {
   Search,
   Eye,
   Info,
+  Video,
+  Globe,
+  Link as LinkIcon,
+  Sparkles,
 } from 'lucide-react';
 import { EbayListing, ConnectedAccount } from '@/lib/ebay/types';
 import { updateDescriptionImages, deduplicateImageUrls } from '@/lib/ebay/template-engine';
@@ -39,6 +43,7 @@ interface SkuImageGroup {
     url: string;
     size?: number;
   }>;
+  videoUrl?: string;
   selected: boolean;
 }
 
@@ -103,6 +108,12 @@ export default function BulkImageUpdateModal({
   onImagesUpdated,
 }: BulkImageUpdateModalProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1); // 1: Folder Selection, 2: Preview & Match, 3: Success
+  const [sourceMode, setSourceMode] = useState<'local' | 'gdrive'>('local');
+  const [gdriveUrl, setGdriveUrl] = useState('');
+  const [gdriveApiKey, setGdriveApiKey] = useState('');
+  const [gdriveRawList, setGdriveRawList] = useState('');
+  const [scanningGdrive, setScanningGdrive] = useState(false);
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState({ current: 0, total: 0 });
   const [skuGroups, setSkuGroups] = useState<SkuImageGroup[]>([]);
@@ -272,6 +283,64 @@ export default function BulkImageUpdateModal({
     }
   };
 
+  // Handle Google Drive Scan
+  const handleScanGoogleDrive = async () => {
+    if (!gdriveUrl.trim() && !gdriveRawList.trim()) {
+      setErrorMsg('Kripya Google Drive folder link ya direct Drive links paste karein.');
+      return;
+    }
+
+    setScanningGdrive(true);
+    setErrorMsg('');
+
+    try {
+      const res = await fetch('/api/ebay/bulk/scan-gdrive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driveUrl: gdriveUrl.trim(),
+          apiKey: gdriveApiKey.trim(),
+          rawList: gdriveRawList.trim(),
+          accountId: activeAccount?.id,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (data.needsApiKey) {
+          setShowApiKeyInput(true);
+        }
+        throw new Error(data.error || 'Google Drive scan failed');
+      }
+
+      const builtGroups: SkuImageGroup[] = (data.groups || []).map((g: any) => ({
+        sku: g.sku,
+        folderName: g.folderName,
+        matchedListing: g.matchedListing,
+        files: (g.images || []).map((imgUrl: string, idx: number) => ({
+          name: `${g.sku}_img_${idx + 1}.jpg`,
+          url: imgUrl,
+        })),
+        videoUrl: g.videoUrl,
+        selected: Boolean(g.matchedListing),
+      }));
+
+      // Sort: Matched listings first
+      builtGroups.sort((a, b) => {
+        if (a.matchedListing && !b.matchedListing) return -1;
+        if (!a.matchedListing && b.matchedListing) return 1;
+        return a.folderName.localeCompare(b.folderName);
+      });
+
+      setSkuGroups(builtGroups);
+      setStep(2);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error scanning Google Drive');
+    } finally {
+      setScanningGdrive(false);
+    }
+  };
+
   // Toggle Selection
   const toggleGroupSelection = (sku: string) => {
     setSkuGroups((prev) =>
@@ -318,6 +387,7 @@ export default function BulkImageUpdateModal({
           listingId: g.matchedListing!.id,
           sku: g.matchedListing!.sku,
           images: cleanNewUrls,
+          videoUrl: g.videoUrl,
         };
 
         const res = await fetch('/api/ebay/listings/bulk-update-images', {
@@ -345,6 +415,7 @@ export default function BulkImageUpdateModal({
           ...existing,
           images: cleanNewUrls,
           imageUrl: cleanNewUrls[0] || existing.imageUrl,
+          videoUrl: g.videoUrl || existing.videoUrl,
           description: updateDescriptionImages(existing.description, cleanNewUrls, existing.images),
           hasUnpublishedChanges: !pushLiveToEbay,
           lastUpdated: new Date().toISOString(),
@@ -387,13 +458,13 @@ export default function BulkImageUpdateModal({
             </div>
             <div>
               <h3 className="font-bold text-base flex items-center gap-2">
-                <span>Update Images by SKU (Folder Match)</span>
+                <span>Update Images & Video by SKU</span>
                 <span className="text-[10px] bg-sky-500/30 text-sky-300 font-semibold px-2 py-0.5 rounded-full border border-sky-400/30">
-                  Old Photos Replaced
+                  Folder & Google Drive
                 </span>
               </h3>
               <p className="text-xs text-slate-300 mt-0.5">
-                Folder name ko listing SKU se match karke sabhi purani images remove hongi aur nayi images update hongi.
+                Folder name ya Google Drive se SKU match karke images aur video replace karein.
               </p>
             </div>
           </div>
@@ -422,89 +493,242 @@ export default function BulkImageUpdateModal({
             </div>
           )}
 
-          {/* STEP 1: FOLDER SELECTION */}
+          {/* STEP 1: SOURCE SELECTION (COMPUTER FOLDER OR GOOGLE DRIVE) */}
           {step === 1 && (
-            <div className="space-y-6">
-              {/* Instructions banner */}
-              <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 text-xs text-sky-900 space-y-2">
-                <div className="font-bold flex items-center gap-1.5 text-sky-800">
-                  <Info className="w-4 h-4 text-sky-600" />
-                  <span>Kaise kaam karta hai? (Simple 1-Folder Step):</span>
-                </div>
-                <p className="text-sky-800 leading-relaxed">
-                  Apne computer se wo Main Folder chuniye jisme har item ka SKU-named folder ho (jaise: <code>SLR03042/</code>, <code>SLR03044/</code>).
-                  System automatically folder name aur SKU match karega. Matched item ki <strong>sabhi purani images remove</strong> ho jayengi aur folder ke andar ki sabhi nayi photos replace ho jayengi!
-                </p>
-              </div>
-
-              {/* Folder Picker Drag & Drop Box */}
-              <div
-                onClick={() => folderInputRef.current?.click()}
-                className="border-2 border-dashed border-sky-300 hover:border-sky-500 bg-sky-50/40 hover:bg-sky-50/80 rounded-2xl p-10 text-center cursor-pointer transition flex flex-col items-center justify-center group"
-              >
-                <input
-                  type="file"
-                  ref={folderInputRef}
-                  onChange={handleFolderSelected}
-                  // @ts-ignore
-                  webkitdirectory="true"
-                  directory=""
-                  multiple
-                  className="hidden"
-                />
-
-                <div className="w-16 h-16 rounded-2xl bg-sky-500/10 text-sky-600 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-sky-500 group-hover:text-white transition duration-200 shadow-sm">
-                  <FolderUp className="w-8 h-8" />
-                </div>
-
-                <h4 className="font-bold text-slate-800 text-base mb-1">
-                  Click to Select Photo Folder from Computer
-                </h4>
-                <p className="text-xs text-slate-500 max-w-md mb-4">
-                  Root folder chuniye jisme subfolders bane hain (e.g. <code>C:\Photos\SLR03042\1.jpg, 2.jpg...</code>).
-                  Aap ek single SKU ka folder bhi choose kar sakte hain.
-                </p>
-
+            <div className="space-y-5">
+              {/* Source Tabs */}
+              <div className="flex border-b border-slate-200 gap-2">
                 <button
                   type="button"
-                  className="bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-sm transition flex items-center space-x-2"
+                  onClick={() => { setSourceMode('local'); setErrorMsg(''); }}
+                  className={`pb-3 px-3 text-xs font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                    sourceMode === 'local'
+                      ? 'border-sky-600 text-sky-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
                 >
                   <FolderUp className="w-4 h-4" />
-                  <span>Choose Folder Containing Photos</span>
+                  <span>From Computer Folder</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSourceMode('gdrive'); setErrorMsg(''); }}
+                  className={`pb-3 px-3 text-xs font-bold flex items-center gap-2 border-b-2 transition cursor-pointer ${
+                    sourceMode === 'gdrive'
+                      ? 'border-indigo-600 text-indigo-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Globe className="w-4 h-4 text-indigo-500" />
+                  <span>From Google Drive Link</span>
+                  <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full font-bold">New</span>
                 </button>
               </div>
 
-              {/* Scanning status */}
-              {scanning && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center space-y-3">
-                  <RefreshCw className="w-6 h-6 text-sky-600 animate-spin mx-auto" />
-                  <div className="text-sm font-bold text-slate-800">
-                    Scanning & Matching Photos with Listings...
+              {/* LOCAL COMPUTER FOLDER MODE */}
+              {sourceMode === 'local' && (
+                <div className="space-y-6">
+                  {/* Instructions banner */}
+                  <div className="bg-sky-50 border border-sky-200 rounded-xl p-4 text-xs text-sky-900 space-y-2">
+                    <div className="font-bold flex items-center gap-1.5 text-sky-800">
+                      <Info className="w-4 h-4 text-sky-600" />
+                      <span>Kaise kaam karta hai? (Simple 1-Folder Step):</span>
+                    </div>
+                    <p className="text-sky-800 leading-relaxed">
+                      Apne computer se wo Main Folder chuniye jisme har item ka SKU-named folder ho (jaise: <code>SLR03042/</code>, <code>SLR03044/</code>).
+                      System automatically folder name aur SKU match karega. Matched item ki <strong>sabhi purani images remove</strong> ho jayengi aur folder ke andar ki sabhi nayi photos replace ho jayengi!
+                    </p>
                   </div>
-                  <div className="text-xs text-slate-500">
-                    Processed {scanProgress.current} of {scanProgress.total} files
-                  </div>
-                  <div className="w-full bg-slate-200 rounded-full h-2 max-w-md mx-auto overflow-hidden">
-                    <div
-                      className="bg-sky-600 h-2 rounded-full transition-all duration-150"
-                      style={{
-                        width: `${scanProgress.total ? (scanProgress.current / scanProgress.total) * 100 : 0}%`,
-                      }}
+
+                  {/* Folder Picker Drag & Drop Box */}
+                  <div
+                    onClick={() => folderInputRef.current?.click()}
+                    className="border-2 border-dashed border-sky-300 hover:border-sky-500 bg-sky-50/40 hover:bg-sky-50/80 rounded-2xl p-10 text-center cursor-pointer transition flex flex-col items-center justify-center group"
+                  >
+                    <input
+                      type="file"
+                      ref={folderInputRef}
+                      onChange={handleFolderSelected}
+                      // @ts-ignore
+                      webkitdirectory="true"
+                      directory=""
+                      multiple
+                      className="hidden"
                     />
+
+                    <div className="w-16 h-16 rounded-2xl bg-sky-500/10 text-sky-600 flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-sky-500 group-hover:text-white transition duration-200 shadow-sm">
+                      <FolderUp className="w-8 h-8" />
+                    </div>
+
+                    <h4 className="font-bold text-slate-800 text-base mb-1">
+                      Click to Select Photo Folder from Computer
+                    </h4>
+                    <p className="text-xs text-slate-500 max-w-md mb-4">
+                      Root folder chuniye jisme subfolders bane hain (e.g. <code>C:\Photos\SLR03042\1.jpg, 2.jpg...</code>).
+                      Aap ek single SKU ka folder bhi choose kar sakte hain.
+                    </p>
+
+                    <button
+                      type="button"
+                      className="bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-sm transition flex items-center space-x-2 cursor-pointer"
+                    >
+                      <FolderUp className="w-4 h-4" />
+                      <span>Choose Folder Containing Photos</span>
+                    </button>
+                  </div>
+
+                  {/* Scanning status */}
+                  {scanning && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 text-center space-y-3">
+                      <RefreshCw className="w-6 h-6 text-sky-600 animate-spin mx-auto" />
+                      <div className="text-sm font-bold text-slate-800">
+                        Scanning & Matching Photos with Listings...
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Processed {scanProgress.current} of {scanProgress.total} files
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2 max-w-md mx-auto overflow-hidden">
+                        <div
+                          className="bg-sky-600 h-2 rounded-full transition-all duration-150"
+                          style={{
+                            width: `${scanProgress.total ? (scanProgress.current / scanProgress.total) * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Structure Example Visual */}
+                  <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 text-xs">
+                    <div className="font-semibold text-slate-700 mb-2">Folder Structure Example:</div>
+                    <div className="font-mono text-[11px] text-slate-600 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
+                      📁 Products_Photos/<br />
+                      &nbsp;&nbsp;├── 📁 <strong>SLR03042</strong>/ (Matches SKU: SLR03042 ➔ 4 photos)<br />
+                      &nbsp;&nbsp;├── 📁 <strong>SLR03044</strong>/ (Matches SKU: SLR03044 ➔ 3 photos)<br />
+                      &nbsp;&nbsp;└── 📁 <strong>SLR02845</strong>/ (Matches SKU: SLR02845 ➔ 5 photos)
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Structure Example Visual */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 text-xs">
-                <div className="font-semibold text-slate-700 mb-2">Folder Structure Example:</div>
-                <div className="font-mono text-[11px] text-slate-600 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
-                  📁 Products_Photos/<br />
-                  &nbsp;&nbsp;├── 📁 <strong>SLR03042</strong>/ (Matches SKU: SLR03042 ➔ 4 photos)<br />
-                  &nbsp;&nbsp;├── 📁 <strong>SLR03044</strong>/ (Matches SKU: SLR03044 ➔ 3 photos)<br />
-                  &nbsp;&nbsp;└── 📁 <strong>SLR02845</strong>/ (Matches SKU: SLR02845 ➔ 5 photos)
+              {/* GOOGLE DRIVE MODE */}
+              {sourceMode === 'gdrive' && (
+                <div className="space-y-5">
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-xs text-indigo-950 space-y-2">
+                    <div className="font-bold flex items-center gap-1.5 text-indigo-800">
+                      <Sparkles className="w-4 h-4 text-indigo-600" />
+                      <span>Google Drive Automatic SKU & Media Match:</span>
+                    </div>
+                    <p className="text-indigo-900 leading-relaxed">
+                      Google Drive folder ka public share link yahan paste karein. System folder ke andar se <strong>SKU match</strong> karke photos aur video ko automatic identify karega aur direct fast streaming URLs me convert karega!
+                    </p>
+                  </div>
+
+                  {/* Drive URL Input Form */}
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                        Google Drive Folder Link
+                      </label>
+                      <div className="relative">
+                        <Globe className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                        <input
+                          type="url"
+                          value={gdriveUrl}
+                          onChange={(e) => setGdriveUrl(e.target.value)}
+                          placeholder="https://drive.google.com/drive/folders/1aBcDeFgHiJkLmNoPqRsTuVwXyZ..."
+                          className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 focus:bg-white focus:outline-none transition"
+                        />
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Make sure Google Drive folder setting is: <em>"Anyone with the link can view"</em>.
+                      </p>
+                    </div>
+
+                    {/* Google API Key (Optional / Expandable) */}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                        className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>{showApiKeyInput ? '− Hide' : '+ Enter'} Google Cloud API Key (Optional - for high-volume folders)</span>
+                      </button>
+
+                      {showApiKeyInput && (
+                        <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 animate-in fade-in">
+                          <label className="block text-[11px] font-bold text-slate-700">
+                            Google Drive API Key (Free from Google Cloud Console)
+                          </label>
+                          <input
+                            type="text"
+                            value={gdriveApiKey}
+                            onChange={(e) => setGdriveApiKey(e.target.value)}
+                            placeholder="AIzaSy..."
+                            className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                          />
+                          <p className="text-[10px] text-slate-500">
+                            Folder ke andar 1000+ files ko list karne ke liye Google Drive API key use hoti hai.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Alternative: Raw List of Links */}
+                    <div className="pt-2 border-t border-slate-100">
+                      <details className="group">
+                        <summary className="text-[11px] font-semibold text-slate-600 group-hover:text-slate-800 cursor-pointer list-none flex items-center justify-between">
+                          <span>Ya direct SKU-wise Google Drive Links paste karein (Manual List)</span>
+                          <span className="text-slate-400 group-open:rotate-180 transition">▼</span>
+                        </summary>
+                        <div className="mt-2.5 space-y-1.5">
+                          <textarea
+                            rows={3}
+                            value={gdriveRawList}
+                            onChange={(e) => setGdriveRawList(e.target.value)}
+                            placeholder={'SLR03042: https://drive.google.com/file/d/..., https://...\nSLR02845: https://drive.google.com/file/d/...'}
+                            className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:bg-white focus:outline-none"
+                          />
+                          <p className="text-[10px] text-slate-500">
+                            Format: <code>SKU: &lt;link1&gt;, &lt;link2&gt;</code> (har nayi line par naya SKU).
+                          </p>
+                        </div>
+                      </details>
+                    </div>
+
+                    {/* Scan Drive Button */}
+                    <button
+                      type="button"
+                      onClick={handleScanGoogleDrive}
+                      disabled={scanningGdrive || (!gdriveUrl.trim() && !gdriveRawList.trim())}
+                      className="w-full bg-gradient-to-r from-indigo-600 to-sky-600 hover:from-indigo-700 hover:to-sky-700 disabled:opacity-50 text-white font-bold text-xs py-3 rounded-xl shadow-md transition flex items-center justify-center space-x-2 cursor-pointer"
+                    >
+                      {scanningGdrive ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Scanning Google Drive & Matching SKUs...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          <span>Scan Google Drive & Match Inventory Listings</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Visual Drive Structure Reference */}
+                  <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 text-xs">
+                    <div className="font-semibold text-slate-700 mb-2">Google Drive Folder Structure:</div>
+                    <div className="font-mono text-[11px] text-slate-600 bg-white p-3 rounded-lg border border-slate-200 leading-relaxed">
+                      ☁️ Google Drive Shared Folder/<br />
+                      &nbsp;&nbsp;├── 📁 <strong>SLR03042</strong>/ ➔ [1.jpg, 2.jpg, video.mp4]<br />
+                      &nbsp;&nbsp;├── 📁 <strong>SLR02845</strong>/ ➔ [ring_1.jpg, ring_2.jpg]<br />
+                      &nbsp;&nbsp;└── (Ya direct files): <strong>SLR03044_1.jpg</strong>, <strong>SLR03044_video.mp4</strong>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -521,16 +745,21 @@ export default function BulkImageUpdateModal({
                     {matchedGroups.length} <span className="text-xs font-normal">items</span>
                   </div>
                   <div className="text-[11px] text-emerald-600 mt-1">
-                    Ready to replace old images with new folder photos
+                    Ready to replace old media with new photos & video
                   </div>
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
                   <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                    Total New Photos
+                    Total New Photos & Media
                   </div>
                   <div className="text-2xl font-black text-slate-800 mt-0.5">
-                    {matchedGroups.reduce((acc, g) => acc + g.files.length, 0)} <span className="text-xs font-normal">images</span>
+                    {matchedGroups.reduce((acc, g) => acc + g.files.length, 0)} <span className="text-xs font-normal">photos</span>
+                    {matchedGroups.filter((g) => g.videoUrl).length > 0 && (
+                      <span className="text-sm font-bold text-purple-600 ml-2">
+                        + {matchedGroups.filter((g) => g.videoUrl).length} videos
+                      </span>
+                    )}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-1">
                     Uploaded and staged for replacement
@@ -539,10 +768,10 @@ export default function BulkImageUpdateModal({
 
                 <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-xl">
                   <div className="text-[11px] font-bold text-amber-800 uppercase tracking-wider">
-                    Unmatched Folders
+                    Unmatched Folders / Links
                   </div>
                   <div className="text-2xl font-black text-amber-700 mt-0.5">
-                    {unmatchedGroups.length} <span className="text-xs font-normal">folders</span>
+                    {unmatchedGroups.length} <span className="text-xs font-normal">unmatched</span>
                   </div>
                   <div className="text-[11px] text-amber-600 mt-1">
                     SKU not found in current inventory
@@ -689,7 +918,7 @@ export default function BulkImageUpdateModal({
 
                               {/* Old vs New replacement badge */}
                               {isMatched && (
-                                <div className="flex items-center gap-2 mt-1.5 text-[11px]">
+                                <div className="flex items-center gap-2 mt-1.5 text-[11px] flex-wrap">
                                   <span className="text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded font-medium">
                                     Old: {oldImgCount} removed
                                   </span>
@@ -697,6 +926,12 @@ export default function BulkImageUpdateModal({
                                   <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
                                     New: {group.files.length} photos ready
                                   </span>
+                                  {group.videoUrl && (
+                                    <span className="inline-flex items-center gap-1 text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded font-bold">
+                                      <Video className="w-3 h-3 text-purple-600" />
+                                      Video included
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>

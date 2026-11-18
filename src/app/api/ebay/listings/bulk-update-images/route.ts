@@ -13,6 +13,7 @@ export async function POST(request: Request) {
       listingId?: string;
       sku: string;
       images: string[];
+      videoUrl?: string;
     }> = body.updates || [];
 
     if (!Array.isArray(updates) || updates.length === 0) {
@@ -108,6 +109,9 @@ export async function POST(request: Request) {
 
       listing.images = [...validNewImages];
       listing.imageUrl = validNewImages[0];
+      if (update.videoUrl) {
+        listing.videoUrl = update.videoUrl;
+      }
 
       // 1b. Update HTML Description so that the template (#gallBlock, carousels, and <img>) renders the new images!
       if (listing.description) {
@@ -134,6 +138,8 @@ export async function POST(request: Request) {
             listing.ebayListingId.replace(/^#/, '').trim(),
             {
               images: validNewImages,
+              videoUrl: update.videoUrl || listing.videoUrl,
+              videoId: listing.videoId,
               description: listing.description,
             }
           );
