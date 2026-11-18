@@ -707,18 +707,20 @@ export function updateDescriptionImages(
   if (!description || typeof description !== 'string') return '';
   let updated = description;
 
+  // Clean up any accidentally appended bottom galleries from previous updates
+  updated = updated.replace(/<div style=["']margin:\s*25px\s*0;?["']>\s*(?:<style>[\s\S]*?<\/style>\s*)?<div[^>]*id=["']gallBlock["'][\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi, '');
+  updated = updated.replace(/<div style=["']margin:\s*25px\s*0;?["']>\s*<div[^>]*id=["']gallBlock["'][\s\S]*?<\/div>\s*<\/div>/gi, '');
+
   const validNew = deduplicateImageUrls(newImages);
   if (validNew.length === 0) return updated;
 
-  const newGallHtml = generateRadioGalleryHtml(validNew);
-
-  // 1. Check for #gallBlock and accurately replace the whole gallery block
+  // 1. If the template ALREADY has #gallBlock, replace that specific gallery block cleanly
   const gallBlockMatch = updated.match(/<div[^>]*id=["']gallBlock["'][^>]*>/i);
   if (gallBlockMatch && gallBlockMatch.index !== undefined) {
     const startIdx = gallBlockMatch.index;
     const endIdx = findMatchingDivEnd(updated, startIdx);
     if (endIdx !== -1) {
-      // Look for a preceding or nearby <style> containing #gallBlock
+      const newGallHtml = generateRadioGalleryHtml(validNew);
       const beforeHtml = updated.slice(0, startIdx);
       const styleMatch = beforeHtml.match(/<style[^>]*>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*$/i);
       if (styleMatch && styleMatch.index !== undefined) {
@@ -729,7 +731,7 @@ export function updateDescriptionImages(
     }
   }
 
-  // 2. Direct exact and protocol-agnostic replacement of known old images
+  // 2. Direct exact and protocol-agnostic replacement of known old product photos
   const validOld = deduplicateImageUrls(oldImages);
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];
@@ -743,7 +745,9 @@ export function updateDescriptionImages(
     }
   }
 
-  // 3. eBay image hash / signature replacement (e.g. s-l500 vs s-l1600 or $_57.JPG)
+  // 3. eBay image hash / signature replacement:
+  // ONLY matches img src that contain the specific eBay hash of an old product photo!
+  // This guarantees template icons, banner graphics, and layout images are 100% UNTOUCHED!
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];
     const oldHash = extractEbayImageHash(oldUrl);
@@ -753,41 +757,13 @@ export function updateDescriptionImages(
     updated = updated.replace(hashRegex, `$1${replacement}$3`);
   }
 
-  // 4. Sequential replacement of any remaining product <img> tags in the description
-  const newSet = new Set(validNew);
-  let prodImgIndex = 0;
-  updated = updated.replace(/<img\b([^>]*?)src=(["'])([^"']+)\2([^>]*?)>/gi, (fullTag, beforeSrc, quote, srcUrl, afterSrc) => {
-    if (newSet.has(srcUrl) || isDecorativeImage(srcUrl)) {
-      return fullTag;
-    }
-    const nextNew = validNew[prodImgIndex] || validNew[validNew.length - 1];
-    prodImgIndex++;
-    return `<img${beforeSrc}src=${quote}${nextNew}${quote}${afterSrc}>`;
-  });
-
-  // 5. Template placeholders replacement
+  // 4. Template placeholders replacement
   updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, validNew[0]);
-  updated = updated.replace(/\{\{\s*(dynamic_gallery|images_gallery)\s*\}\}/gi, newGallHtml);
   for (let i = 1; i <= 12; i++) {
     const rep = validNew[i - 1] || validNew[0];
     updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), rep);
     updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), rep);
     updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), rep);
-  }
-
-  // 6. If the description had NO gallery container at all, but multiple photos were uploaded,
-  // ensure the new interactive gallery is present if no gallBlock exists
-  if (validNew.length > 1 && !updated.includes('id="gallBlock"')) {
-    if (updated.includes('{{DYNAMIC_GALLERY}}') || updated.includes('{{IMAGES_GALLERY}}')) {
-      updated = updated.replace(/\{\{\s*(dynamic_gallery|images_gallery)\s*\}\}/gi, newGallHtml);
-    } else {
-      const lastDivClose = updated.lastIndexOf('</div>');
-      if (lastDivClose !== -1) {
-        updated = updated.slice(0, lastDivClose) + `\n<div style="margin: 25px 0;">${newGallHtml}</div>\n` + updated.slice(lastDivClose);
-      } else {
-        updated += `\n${newGallHtml}`;
-      }
-    }
   }
 
   return sanitizeGalleryHtml(updated);
