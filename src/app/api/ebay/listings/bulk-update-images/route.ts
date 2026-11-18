@@ -42,6 +42,10 @@ export async function POST(request: Request) {
       title: string;
       oldImageCount: number;
       newImageCount: number;
+      description?: string;
+      images?: string[];
+      imageUrl?: string;
+      videoUrl?: string;
       success: boolean;
       pushedToEbay: boolean;
       message: string;
@@ -164,6 +168,10 @@ export async function POST(request: Request) {
         title: listing.title,
         oldImageCount,
         newImageCount: validNewImages.length,
+        description: listing.description,
+        images: listing.images,
+        imageUrl: listing.imageUrl,
+        videoUrl: listing.videoUrl,
         success: true,
         pushedToEbay,
         message: pushedToEbay

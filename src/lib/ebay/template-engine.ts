@@ -651,6 +651,53 @@ export const DEFAULT_TEMPLATES: DescriptionTemplate[] = [
   },
 ];
 
+function extractEbayImageHash(url?: string | null): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const match = url.match(/\/images\/g\/([a-zA-Z0-9_-]+)/i) ||
+                url.match(/\/z\/([a-zA-Z0-9_-]+)/i) ||
+                url.match(/\/00\/s\/[^\/]+\/z\/([a-zA-Z0-9_-]+)/i);
+  return match ? match[1] : null;
+}
+
+function isDecorativeImage(url?: string | null): boolean {
+  if (!url) return true;
+  const lower = url.toLowerCase();
+  return lower.includes('spacer.gif') ||
+         lower.includes('pixel.gif') ||
+         lower.includes('ebay-static') ||
+         lower.includes('rover.ebay.com') ||
+         lower.includes('paypal') ||
+         lower.includes('visa') ||
+         lower.includes('mastercard') ||
+         lower.includes('credit-card') ||
+         lower.includes('payment') ||
+         lower.includes('badge') ||
+         lower.includes('icon_') ||
+         lower.startsWith('data:image/gif;base64,r0lgodlh');
+}
+
+function findMatchingDivEnd(html: string, startIndex: number): number {
+  let depth = 0;
+  let i = startIndex;
+  const len = html.length;
+
+  while (i < len) {
+    if (html.slice(i, i + 4).toLowerCase() === '<div') {
+      depth++;
+      i += 4;
+    } else if (html.slice(i, i + 6).toLowerCase() === '</div>') {
+      depth--;
+      i += 6;
+      if (depth === 0) {
+        return i;
+      }
+    } else {
+      i++;
+    }
+  }
+  return -1;
+}
+
 // Update all images embedded in an HTML description (including #gallBlock, gallery grids, and <img> tags)
 export function updateDescriptionImages(
   description?: string | null,
@@ -661,38 +708,86 @@ export function updateDescriptionImages(
   let updated = description;
 
   const validNew = deduplicateImageUrls(newImages);
-
   if (validNew.length === 0) return updated;
-
-  // 1. Replace #gallBlock pure-CSS gallery (with preceding <style> if present, or standalone #gallBlock)
-  const fullGallBlockRegex = /<style>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*<div[^>]*id=["']gallBlock["'][^>]*>[\s\S]*?id=["']gallThumbs["'][\s\S]*?<\/div>\s*<\/div>/i;
-  const bareGallBlockRegex = /<div[^>]*id=["']gallBlock["'][^>]*>[\s\S]*?id=["']gallThumbs["'][\s\S]*?<\/div>\s*<\/div>/i;
 
   const newGallHtml = generateRadioGalleryHtml(validNew);
 
-  if (fullGallBlockRegex.test(updated)) {
-    updated = updated.replace(fullGallBlockRegex, newGallHtml);
-  } else if (bareGallBlockRegex.test(updated)) {
-    updated = updated.replace(bareGallBlockRegex, newGallHtml);
+  // 1. Check for #gallBlock and accurately replace the whole gallery block
+  const gallBlockMatch = updated.match(/<div[^>]*id=["']gallBlock["'][^>]*>/i);
+  if (gallBlockMatch && gallBlockMatch.index !== undefined) {
+    const startIdx = gallBlockMatch.index;
+    const endIdx = findMatchingDivEnd(updated, startIdx);
+    if (endIdx !== -1) {
+      // Look for a preceding or nearby <style> containing #gallBlock
+      const beforeHtml = updated.slice(0, startIdx);
+      const styleMatch = beforeHtml.match(/<style[^>]*>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*$/i);
+      if (styleMatch && styleMatch.index !== undefined) {
+        updated = updated.slice(0, styleMatch.index) + newGallHtml + updated.slice(endIdx);
+      } else {
+        updated = updated.slice(0, startIdx) + newGallHtml + updated.slice(endIdx);
+      }
+    }
   }
 
-  // 2. Direct replacement of any known old images in the HTML description
+  // 2. Direct exact and protocol-agnostic replacement of known old images
   const validOld = deduplicateImageUrls(oldImages);
-
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];
     if (!oldUrl) continue;
     const replacement = validNew[i] || validNew[0];
     updated = updated.split(oldUrl).join(replacement);
+    if (oldUrl.startsWith('https://')) {
+      updated = updated.split(oldUrl.replace('https://', 'http://')).join(replacement);
+    } else if (oldUrl.startsWith('http://')) {
+      updated = updated.split(oldUrl.replace('http://', 'https://')).join(replacement);
+    }
   }
 
-  // 3. Replace any IMG_1..12 or THUMB_1..12 or {{IMAGE_1}} / {{MAIN_IMAGE}}
+  // 3. eBay image hash / signature replacement (e.g. s-l500 vs s-l1600 or $_57.JPG)
+  for (let i = 0; i < validOld.length; i++) {
+    const oldUrl = validOld[i];
+    const oldHash = extractEbayImageHash(oldUrl);
+    if (!oldHash) continue;
+    const replacement = validNew[i] || validNew[0];
+    const hashRegex = new RegExp(`(src=["'])([^"']*${oldHash}[^"']*)(["'])`, 'gi');
+    updated = updated.replace(hashRegex, `$1${replacement}$3`);
+  }
+
+  // 4. Sequential replacement of any remaining product <img> tags in the description
+  const newSet = new Set(validNew);
+  let prodImgIndex = 0;
+  updated = updated.replace(/<img\b([^>]*?)src=(["'])([^"']+)\2([^>]*?)>/gi, (fullTag, beforeSrc, quote, srcUrl, afterSrc) => {
+    if (newSet.has(srcUrl) || isDecorativeImage(srcUrl)) {
+      return fullTag;
+    }
+    const nextNew = validNew[prodImgIndex] || validNew[validNew.length - 1];
+    prodImgIndex++;
+    return `<img${beforeSrc}src=${quote}${nextNew}${quote}${afterSrc}>`;
+  });
+
+  // 5. Template placeholders replacement
   updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, validNew[0]);
+  updated = updated.replace(/\{\{\s*(dynamic_gallery|images_gallery)\s*\}\}/gi, newGallHtml);
   for (let i = 1; i <= 12; i++) {
-    const replacement = validNew[i - 1] || validNew[0];
-    updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), replacement);
-    updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), replacement);
-    updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), replacement);
+    const rep = validNew[i - 1] || validNew[0];
+    updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), rep);
+    updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), rep);
+    updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), rep);
+  }
+
+  // 6. If the description had NO gallery container at all, but multiple photos were uploaded,
+  // ensure the new interactive gallery is present if no gallBlock exists
+  if (validNew.length > 1 && !updated.includes('id="gallBlock"')) {
+    if (updated.includes('{{DYNAMIC_GALLERY}}') || updated.includes('{{IMAGES_GALLERY}}')) {
+      updated = updated.replace(/\{\{\s*(dynamic_gallery|images_gallery)\s*\}\}/gi, newGallHtml);
+    } else {
+      const lastDivClose = updated.lastIndexOf('</div>');
+      if (lastDivClose !== -1) {
+        updated = updated.slice(0, lastDivClose) + `\n<div style="margin: 25px 0;">${newGallHtml}</div>\n` + updated.slice(lastDivClose);
+      } else {
+        updated += `\n${newGallHtml}`;
+      }
+    }
   }
 
   return sanitizeGalleryHtml(updated);

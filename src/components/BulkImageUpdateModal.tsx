@@ -424,12 +424,14 @@ export default function BulkImageUpdateModal({
         }
 
         const existing = g.matchedListing!;
+        const serverResult = data.results && data.results[0];
+        const updatedDesc = serverResult?.description || updateDescriptionImages(existing.description, cleanNewUrls, existing.images);
         const updated: EbayListing = {
           ...existing,
           images: cleanNewUrls,
           imageUrl: cleanNewUrls[0] || existing.imageUrl,
           videoUrl: g.videoUrl || existing.videoUrl,
-          description: updateDescriptionImages(existing.description, cleanNewUrls, existing.images),
+          description: updatedDesc,
           hasUnpublishedChanges: !pushLiveToEbay,
           lastUpdated: new Date().toISOString(),
         };
