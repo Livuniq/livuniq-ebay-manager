@@ -22,10 +22,10 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: true,
         mode: 'LIVE',
-        message: `Successfully synced live eBay catalog for ${account.ebayUsername}!`,
+        message: `Successfully synced live eBay catalog & messages for ${account.ebayUsername}!`,
         syncedListings: liveResult.syncedListings,
         syncedOrders: liveResult.syncedOrders,
-        syncedMessages: 0,
+        syncedMessages: liveResult.syncedMessages || 0,
         timestamp: account.lastSyncedAt,
       });
     }

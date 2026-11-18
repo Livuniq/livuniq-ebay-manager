@@ -1,5 +1,5 @@
 import { getStore, saveStore, saveStoreAsync } from './server-store';
-import { ConnectedAccount, EbayListing, EbayOrder } from './types';
+import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, EbayMessage } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
 import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml, deduplicateImageUrls } from './template-engine';
 import fs from 'fs';
@@ -92,6 +92,7 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
 export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
   syncedListings: number;
   syncedOrders: number;
+  syncedMessages?: number;
   username: string;
   error?: string;
 }> {
@@ -398,11 +399,20 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
     targetAcc.lastSyncedAt = account.lastSyncedAt;
   }
 
+  // 6. Sync Buyer Messages from eBay
+  let syncedMessages = 0;
+  try {
+    syncedMessages = await syncLiveEbayMessages(account);
+  } catch (msgErr) {
+    console.error('Error syncing live eBay messages in syncLiveEbayData:', msgErr);
+  }
+
   await saveStoreAsync(store);
 
   return {
     syncedListings: fetchedListings.length,
     syncedOrders: 0,
+    syncedMessages,
     username: realUsername,
   };
 }
@@ -997,6 +1007,329 @@ export async function endLiveEbayListing(
       return { success: true, message: `Listing #${itemId} ended on eBay.` };
     } else {
       const errMsg = extractEbayErrorMessage(respText, 'eBay EndFixedPriceItem returned error');
+      return { success: false, message: errMsg };
+    }
+  } catch (err) {
+    return { success: false, message: (err as Error).message };
+  }
+}
+
+function encodeXmlEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// 7. Sync Buyer Messages directly from eBay Trading API (GetMemberMessages & GetMyMessages)
+export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<number> {
+  const store = getStore();
+  let accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
+  const masterConfig = store.masterConfig;
+
+  if (!accessToken) {
+    return 0;
+  }
+
+  const tradingUrl = isSandboxEnv(masterConfig)
+    ? 'https://api.sandbox.ebay.com/ws/api.dll'
+    : 'https://api.ebay.com/ws/api.dll';
+
+  const siteId = account.marketplace === 'EBAY_GB' ? '3' : account.marketplace === 'EBAY_DE' ? '77' : '0';
+  const newThreads: EbayMessageThread[] = [];
+
+  // A. Fetch AskSellerQuestion / Member Messages via GetMemberMessages
+  try {
+    const endIso = new Date().toISOString();
+    const startIso = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+
+    const makeMemberMessagesXml = (msgType: string) => `<?xml version="1.0" encoding="utf-8"?>
+<GetMemberMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <MailMessageType>${msgType}</MailMessageType>
+  <DetailLevel>ReturnAll</DetailLevel>
+  <StartCreationTime>${startIso}</StartCreationTime>
+  <EndCreationTime>${endIso}</EndCreationTime>
+  <Pagination>
+    <EntriesPerPage>50</EntriesPerPage>
+    <PageNumber>1</PageNumber>
+  </Pagination>
+</GetMemberMessagesRequest>`;
+
+    let res = await fetch(tradingUrl, {
+      method: 'POST',
+      headers: {
+        'X-EBAY-API-SITEID': siteId,
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+        'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
+        'X-EBAY-API-IAF-TOKEN': accessToken,
+        'Content-Type': 'text/xml',
+      },
+      body: makeMemberMessagesXml('All'),
+    });
+
+    let respXml = await res.text();
+
+    if (respXml.includes('IAF token supplied is expired') || respXml.includes('21916984') || respXml.includes('931')) {
+      const freshToken = await ensureFreshAccessToken(account, true);
+      if (freshToken) {
+        accessToken = freshToken;
+        res = await fetch(tradingUrl, {
+          method: 'POST',
+          headers: {
+            'X-EBAY-API-SITEID': siteId,
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+            'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
+            'X-EBAY-API-IAF-TOKEN': freshToken,
+            'Content-Type': 'text/xml',
+          },
+          body: makeMemberMessagesXml('All'),
+        });
+        respXml = await res.text();
+      }
+    }
+
+    // If 'All' is disallowed by schema, retry with 'AskSellerQuestion'
+    if (respXml.includes('<SeverityCode>Error</SeverityCode>') && respXml.includes('MailMessageType')) {
+      res = await fetch(tradingUrl, {
+        method: 'POST',
+        headers: {
+          'X-EBAY-API-SITEID': siteId,
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+          'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
+          'X-EBAY-API-IAF-TOKEN': accessToken,
+          'Content-Type': 'text/xml',
+        },
+        body: makeMemberMessagesXml('AskSellerQuestion'),
+      });
+      respXml = await res.text();
+    }
+
+    // Parse MemberMessageExchange nodes
+    const exchangeRegex = /<MemberMessageExchange>([\s\S]*?)<\/MemberMessageExchange>/g;
+    let exMatch;
+    while ((exMatch = exchangeRegex.exec(respXml)) !== null) {
+      const block = exMatch[1];
+      const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
+      const itemTitle = decodeXmlEntities(block.match(/<Title>([^<]+)<\/Title>/)?.[1] || '');
+      const senderId = block.match(/<SenderID>([^<]+)<\/SenderID>/)?.[1] || 'buyer';
+      const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || 'Inquiry regarding listing');
+      const body = decodeXmlEntities(block.match(/<Body>([\s\S]*?)<\/Body>/)?.[1] || '');
+      const messageId = block.match(/<MessageID>([^<]+)<\/MessageID>/)?.[1] || `${Date.now()}`;
+      const creationDate = block.match(/<CreationDate>([^<]+)<\/CreationDate>/)?.[1] || new Date().toISOString();
+      const status = block.match(/<MessageStatus>([^<]+)<\/MessageStatus>/)?.[1] || 'Unanswered';
+      const isUnanswered = status.toLowerCase() === 'unanswered';
+
+      const thrId = `thr-ebay-${messageId}`;
+      const msgs: EbayMessage[] = [
+        {
+          id: `msg-${messageId}`,
+          sender: senderId,
+          senderRole: 'BUYER',
+          timestamp: creationDate,
+          body: body || subject,
+        },
+      ];
+
+      // Check for seller response
+      const responseMatch = block.match(/<Response>([\s\S]*?)<\/Response>/);
+      if (responseMatch) {
+        msgs.push({
+          id: `msg-resp-${messageId}`,
+          sender: account.ebayUsername || 'Seller',
+          senderRole: 'SELLER',
+          timestamp: creationDate,
+          body: decodeXmlEntities(responseMatch[1]),
+        });
+      }
+
+      newThreads.push({
+        id: thrId,
+        accountId: account.id,
+        buyerUsername: senderId,
+        buyerName: senderId,
+        itemTitle: itemTitle || (itemId ? `Item #${itemId}` : undefined),
+        listingId: itemId ? `lst-${itemId}` : undefined,
+        subject,
+        lastMessageSnippet: (body || subject).slice(0, 120),
+        lastUpdated: creationDate,
+        unread: isUnanswered,
+        messages: msgs,
+      });
+    }
+  } catch (err) {
+    console.error('Error fetching GetMemberMessages:', err);
+  }
+
+  // B. Also query GetMyMessages to capture seller inbox messages
+  try {
+    const getMyMessagesXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnMessages</DetailLevel>
+</GetMyMessagesRequest>`;
+
+    const myMsgRes = await fetch(tradingUrl, {
+      method: 'POST',
+      headers: {
+        'X-EBAY-API-SITEID': siteId,
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+        'X-EBAY-API-CALL-NAME': 'GetMyMessages',
+        'X-EBAY-API-IAF-TOKEN': accessToken,
+        'Content-Type': 'text/xml',
+      },
+      body: getMyMessagesXml,
+    });
+
+    const myMsgXml = await myMsgRes.text();
+    const msgRegex = /<Message>([\s\S]*?)<\/Message>/g;
+    let mMatch;
+    while ((mMatch = msgRegex.exec(myMsgXml)) !== null) {
+      const block = mMatch[1];
+      const messageId = block.match(/<MessageID>([^<]+)<\/MessageID>/)?.[1] || '';
+      if (!messageId) continue;
+
+      const sender = block.match(/<Sender>([^<]+)<\/Sender>/)?.[1] || 'eBay Member';
+      // Filter out pure automated notices unless they relate to an item
+      if (sender.toLowerCase() === 'ebay' && !block.includes('<ItemID>')) continue;
+
+      const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || `Message from ${sender}`);
+      const textRaw = block.match(/<Text>([\s\S]*?)<\/Text>/)?.[1] || '';
+      const textClean = decodeXmlEntities(textRaw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      const receiveDate = block.match(/<ReceiveDate>([^<]+)<\/ReceiveDate>/)?.[1] || new Date().toISOString();
+      const read = block.match(/<Read>([^<]+)<\/Read>/)?.[1] === 'true';
+      const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
+
+      const thrId = `thr-ebay-${messageId}`;
+      if (!newThreads.some((t) => t.id === thrId)) {
+        newThreads.push({
+          id: thrId,
+          accountId: account.id,
+          buyerUsername: sender,
+          buyerName: sender,
+          itemTitle: itemId ? `Listing #${itemId}` : undefined,
+          listingId: itemId ? `lst-${itemId}` : undefined,
+          subject,
+          lastMessageSnippet: (textClean || subject).slice(0, 120),
+          lastUpdated: receiveDate,
+          unread: !read,
+          messages: [
+            {
+              id: `msg-${messageId}`,
+              sender,
+              senderRole: 'BUYER',
+              timestamp: receiveDate,
+              body: textClean || subject,
+            },
+          ],
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching GetMyMessages:', err);
+  }
+
+  // C. Merge into store.threads
+  if (newThreads.length > 0) {
+    const otherThreads = store.threads.filter((t) => t.accountId !== account.id);
+    const existingAccountThreads = store.threads.filter((t) => t.accountId === account.id);
+
+    for (const newThr of newThreads) {
+      const idx = existingAccountThreads.findIndex(
+        (t) => t.id === newThr.id || (t.buyerUsername === newThr.buyerUsername && t.subject === newThr.subject)
+      );
+      if (idx >= 0) {
+        existingAccountThreads[idx] = {
+          ...existingAccountThreads[idx],
+          ...newThr,
+          messages: newThr.messages.length >= existingAccountThreads[idx].messages.length ? newThr.messages : existingAccountThreads[idx].messages,
+        };
+      } else {
+        existingAccountThreads.unshift(newThr);
+      }
+    }
+
+    store.threads = [...existingAccountThreads, ...otherThreads];
+    await saveStoreAsync(store);
+  }
+
+  return newThreads.length;
+}
+
+// 8. Reply directly to buyer on live eBay via AddMemberMessageRTQ
+export async function sendLiveEbayReply(
+  account: ConnectedAccount,
+  params: {
+    itemId?: string;
+    parentMessageId?: string;
+    recipientUsername: string;
+    replyText: string;
+  }
+): Promise<{ success: boolean; message: string }> {
+  let accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
+  const masterConfig = getStore().masterConfig;
+
+  if (!accessToken) {
+    return { success: false, message: 'No active access token for account' };
+  }
+
+  const tradingUrl = isSandboxEnv(masterConfig)
+    ? 'https://api.sandbox.ebay.com/ws/api.dll'
+    : 'https://api.ebay.com/ws/api.dll';
+
+  const siteId = account.marketplace === 'EBAY_GB' ? '3' : account.marketplace === 'EBAY_DE' ? '77' : '0';
+  const rawItemId = params.itemId ? params.itemId.replace(/^lst-/, '') : '';
+
+  const addXml = `<?xml version="1.0" encoding="utf-8"?>
+<AddMemberMessageRTQRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  ${rawItemId ? `<ItemID>${rawItemId}</ItemID>` : ''}
+  <MemberMessage>
+    <Body>${encodeXmlEntities(params.replyText)}</Body>
+    ${params.parentMessageId ? `<ParentMessageID>${params.parentMessageId.replace(/^msg-/, '')}</ParentMessageID>` : ''}
+    <RecipientID>${encodeXmlEntities(params.recipientUsername)}</RecipientID>
+  </MemberMessage>
+</AddMemberMessageRTQRequest>`;
+
+  try {
+    let res = await fetch(tradingUrl, {
+      method: 'POST',
+      headers: {
+        'X-EBAY-API-SITEID': siteId,
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+        'X-EBAY-API-CALL-NAME': 'AddMemberMessageRTQ',
+        'X-EBAY-API-IAF-TOKEN': accessToken,
+        'Content-Type': 'text/xml',
+      },
+      body: addXml,
+    });
+
+    let respText = await res.text();
+
+    if (respText.includes('IAF token supplied is expired') || respText.includes('21916984')) {
+      const freshToken = await ensureFreshAccessToken(account, true);
+      if (freshToken) {
+        accessToken = freshToken;
+        const retryRes = await fetch(tradingUrl, {
+          method: 'POST',
+          headers: {
+            'X-EBAY-API-SITEID': siteId,
+            'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+            'X-EBAY-API-CALL-NAME': 'AddMemberMessageRTQ',
+            'X-EBAY-API-IAF-TOKEN': freshToken,
+            'Content-Type': 'text/xml',
+          },
+          body: addXml,
+        });
+        respText = await retryRes.text();
+      }
+    }
+
+    const isSuccess = respText.includes('<Ack>Success</Ack>') || respText.includes('<Ack>Warning</Ack>');
+    if (isSuccess) {
+      return { success: true, message: 'Reply sent directly to buyer on eBay!' };
+    } else {
+      const errMsg = extractEbayErrorMessage(respText, 'eBay failed to deliver reply message');
       return { success: false, message: errMsg };
     }
   } catch (err) {

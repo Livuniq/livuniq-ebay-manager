@@ -822,6 +822,46 @@ export default function Home() {
     }
   };
 
+  // Live message sync from eBay
+  const [isSyncingMessages, setIsSyncingMessages] = useState(false);
+  const [msgSyncStatus, setMsgSyncStatus] = useState<string | null>(null);
+
+  const handleSyncMessages = async (forceSync = true) => {
+    setIsSyncingMessages(true);
+    setMsgSyncStatus(null);
+    try {
+      const res = await fetch(`/api/ebay/messages?accountId=${activeAccountId || ''}&sync=${forceSync ? 'true' : 'false'}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.threads)) {
+        setThreads(data.threads);
+        if (data.threads.length > 0 && !selectedThreadId) {
+          setSelectedThreadId(data.threads[0].id);
+        }
+        if (data.liveSyncedCount !== undefined) {
+          setMsgSyncStatus(
+            data.liveSyncedCount > 0
+              ? `✅ ${data.liveSyncedCount} live messages fetched from eBay!`
+              : '✅ Inbox synchronized: all eBay messages up-to-date.'
+          );
+          setTimeout(() => setMsgSyncStatus(null), 4000);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync messages:', err);
+      setMsgSyncStatus('❌ Sync failed. Please verify store connection.');
+      setTimeout(() => setMsgSyncStatus(null), 4000);
+    } finally {
+      setIsSyncingMessages(false);
+    }
+  };
+
+  // Auto-sync live messages when opening the messages tab
+  useEffect(() => {
+    if (activeTab === 'messages' && activeAccount?.accessToken) {
+      handleSyncMessages(true);
+    }
+  }, [activeTab, activeAccountId]);
+
   // Simulate an incoming buyer message for testing
   const [isSimulatingMessage, setIsSimulatingMessage] = useState(false);
   const handleSimulateMessage = async () => {
@@ -1900,15 +1940,38 @@ export default function Home() {
                       </span>
                     )}
                   </div>
-                  <button
-                    onClick={handleSimulateMessage}
-                    disabled={isSimulatingMessage}
-                    className="text-[11px] font-medium bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-slate-200 hover:border-blue-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
-                    title="Generate a test incoming buyer inquiry"
-                  >
-                    <span>{isSimulatingMessage ? 'Creating...' : '+ Test Buyer Message'}</span>
-                  </button>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={() => handleSyncMessages(true)}
+                      disabled={isSyncingMessages}
+                      className="text-[11px] font-medium bg-white hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
+                      title="Sync live messages directly from eBay inbox"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isSyncingMessages ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingMessages ? 'Syncing...' : 'Sync eBay Inbox'}</span>
+                    </button>
+                    <button
+                      onClick={handleSimulateMessage}
+                      disabled={isSimulatingMessage}
+                      className="text-[11px] font-medium bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-slate-200 hover:border-blue-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
+                      title="Generate a test incoming buyer inquiry"
+                    >
+                      <span>{isSimulatingMessage ? 'Creating...' : '+ Test'}</span>
+                    </button>
+                  </div>
                 </div>
+
+                {msgSyncStatus && (
+                  <div className="bg-emerald-50 text-emerald-800 text-[11px] font-medium px-3.5 py-2 border-b border-emerald-200 flex items-center justify-between">
+                    <span>{msgSyncStatus}</span>
+                    <button
+                      onClick={() => setMsgSyncStatus(null)}
+                      className="text-emerald-600 hover:text-emerald-900 font-bold text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
 
                 <div className="overflow-y-auto flex-1 min-h-0 divide-y divide-slate-100">
                   {threads.length === 0 ? (

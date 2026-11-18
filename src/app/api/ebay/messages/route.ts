@@ -1,16 +1,61 @@
 import { NextResponse } from 'next/server';
-import { getMessageThreads, sendReply, markThreadAsRead, getStore, saveStore, getActiveAccountId } from '@/lib/ebay/server-store';
+import { getMessageThreads, sendReply, markThreadAsRead, getStore, saveStore, getActiveAccountId, ensureStoreAsync } from '@/lib/ebay/server-store';
+import { syncLiveEbayMessages, sendLiveEbayReply } from '@/lib/ebay/live-sync';
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get('accountId') || undefined;
-  const threads = getMessageThreads(accountId);
-  return NextResponse.json({ success: true, threads });
+  try {
+    await ensureStoreAsync();
+    const { searchParams } = new URL(request.url);
+    const accountId = searchParams.get('accountId') || undefined;
+    const doSync = searchParams.get('sync') === 'true';
+
+    const store = getStore();
+    const targetAccountId = accountId || store.activeAccountId;
+    const account = store.accounts.find((a) => a.id === targetAccountId);
+
+    let liveSyncedCount = 0;
+    if (doSync && account && account.accessToken) {
+      try {
+        liveSyncedCount = await syncLiveEbayMessages(account);
+      } catch (syncErr) {
+        console.error('Error syncing live messages in GET /api/ebay/messages:', syncErr);
+      }
+    }
+
+    const threads = getMessageThreads(targetAccountId);
+    return NextResponse.json({ success: true, threads, liveSyncedCount });
+  } catch (err) {
+    return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
   try {
+    await ensureStoreAsync();
     const body = await request.json();
+
+    // 0. Manual / Explicit Live Message Sync
+    if (body.action === 'sync') {
+      const store = getStore();
+      const targetAccountId = body.accountId || getActiveAccountId();
+      const account = store.accounts.find((a) => a.id === targetAccountId) || store.accounts[0];
+
+      if (!account || !account.accessToken) {
+        return NextResponse.json({
+          success: false,
+          error: 'Active connected store with eBay token required for live sync',
+        });
+      }
+
+      const count = await syncLiveEbayMessages(account);
+      const threads = getMessageThreads(targetAccountId);
+      return NextResponse.json({
+        success: true,
+        message: `Successfully pulled ${count} messages directly from eBay!`,
+        syncedCount: count,
+        threads,
+      });
+    }
 
     // 1. Simulate an incoming test buyer inquiry
     if (body.action === 'simulate') {
@@ -96,7 +141,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Thread not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true, thread: updated });
+    // Dispatch reply to live eBay if seller has an active OAuth access token
+    let liveReplyResult: { success: boolean; message: string } | null = null;
+    const store = getStore();
+    const account = store.accounts.find((a) => a.id === updated.accountId);
+    if (account && account.accessToken) {
+      const lastBuyerMsg = [...updated.messages].reverse().find((m) => m.senderRole === 'BUYER');
+      try {
+        liveReplyResult = await sendLiveEbayReply(account, {
+          itemId: updated.listingId,
+          parentMessageId: lastBuyerMsg?.id,
+          recipientUsername: updated.buyerUsername,
+          replyText: reply,
+        });
+      } catch (replyErr) {
+        console.error('Failed to dispatch reply to live eBay:', replyErr);
+      }
+    }
+
+    return NextResponse.json({ success: true, thread: updated, liveReplyResult });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: (err as Error).message },
