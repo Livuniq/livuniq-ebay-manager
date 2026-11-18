@@ -926,18 +926,15 @@ export async function reviseLiveEbayListing(
     itemXmlFields += profilesXml;
   }
 
-  // Location fields configured per account or listing
-  const targetCountry = updates.locationCountry || account.locationCountry;
-  const targetPostal = updates.locationPostalCode || account.locationPostalCode;
-  const targetCityState = updates.locationCityState || account.locationCityState;
-  if (targetCountry) {
-    itemXmlFields += `<Country>${targetCountry}</Country>`;
+  // Location fields: Only revise if explicitly specified in updates (never send fallback account country during image/video updates)
+  if (updates.locationCountry) {
+    itemXmlFields += `<Country>${updates.locationCountry}</Country>`;
   }
-  if (targetPostal) {
-    itemXmlFields += `<PostalCode>${targetPostal}</PostalCode>`;
+  if (updates.locationPostalCode) {
+    itemXmlFields += `<PostalCode>${updates.locationPostalCode}</PostalCode>`;
   }
-  if (targetCityState) {
-    itemXmlFields += `<Location><![CDATA[${targetCityState}]]></Location>`;
+  if (updates.locationCityState) {
+    itemXmlFields += `<Location><![CDATA[${updates.locationCityState}]]></Location>`;
   }
 
   const reviseXml = `<?xml version="1.0" encoding="utf-8"?>
