@@ -35,6 +35,8 @@ export interface EbayListing {
   currency: string;
   quantity: number;
   sold: number;
+  views?: number;
+  watchers?: number;
   category: string;
   condition: 'NEW' | 'USED' | 'REFURBISHED';
   imageUrl: string;

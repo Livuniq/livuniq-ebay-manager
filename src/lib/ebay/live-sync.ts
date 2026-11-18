@@ -179,6 +179,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
 <GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ActiveList>
     <Include>true</Include>
+    <IncludeWatchCount>true</IncludeWatchCount>
     <Pagination>
       <EntriesPerPage>100</EntriesPerPage>
       <PageNumber>1</PageNumber>
@@ -256,6 +257,10 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
 
       const parsedLiveQty = !isNaN(parseInt(quantityStr)) ? parseInt(quantityStr) : 0;
       const parsedSoldQty = !isNaN(parseInt(quantitySoldStr)) ? parseInt(quantitySoldStr) : 0;
+      const hitCountMatch = itemBlock.match(/<HitCount>([^<]+)<\/HitCount>/)?.[1];
+      const watchCountMatch = itemBlock.match(/<WatchCount>([^<]+)<\/WatchCount>/)?.[1];
+      const initialViews = hitCountMatch !== undefined ? (parseInt(hitCountMatch) || 0) : 0;
+      const initialWatchers = watchCountMatch !== undefined ? (parseInt(watchCountMatch) || 0) : 0;
 
       if (itemId) {
         fetchedListings.push({
@@ -267,6 +272,8 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
           currency: account.currency || 'USD',
           quantity: parsedLiveQty,
           sold: parsedSoldQty,
+          views: initialViews,
+          watchers: initialWatchers,
           category,
           condition: 'NEW',
           imageUrl: uniquePictureUrls[0] || galleryUrl,
@@ -297,6 +304,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
 <GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ItemID>${item.ebayListingId}</ItemID>
   <DetailLevel>ReturnAll</DetailLevel>
+  <IncludeWatchCount>true</IncludeWatchCount>
   <IncludeItemSpecifics>true</IncludeItemSpecifics>
 </GetItemRequest>`;
 
@@ -340,6 +348,16 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       if (liveQty !== undefined && liveQty !== null && !isNaN(parseInt(liveQty))) {
         item.quantity = parseInt(liveQty);
         item.status = item.quantity > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
+      }
+
+      // Views & Watchers
+      const hitCountMatch = itemDetailXml.match(/<HitCount>([^<]+)<\/HitCount>/)?.[1];
+      if (hitCountMatch !== undefined) {
+        item.views = parseInt(hitCountMatch) || 0;
+      }
+      const watchCountMatch = itemDetailXml.match(/<WatchCount>([^<]+)<\/WatchCount>/)?.[1];
+      if (watchCountMatch !== undefined) {
+        item.watchers = parseInt(watchCountMatch) || 0;
       }
 
       // Photos

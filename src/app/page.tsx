@@ -33,6 +33,8 @@ import {
   Key,
   UploadCloud,
   Save,
+  Eye,
+  Heart,
 } from 'lucide-react';
 import { isJunkMessageOrCss } from '@/lib/ebay/template-engine';
 import {
@@ -1642,7 +1644,7 @@ export default function Home() {
                         <th className="py-3 px-4">Item & Details</th>
                         <th className="py-3 px-4">eBay Item ID / SKU</th>
                         <th className="py-3 px-4">Price ({activeAccount?.currency})</th>
-                        <th className="py-3 px-4">Stock / Sold</th>
+                        <th className="py-3 px-4">Stock / Sold / Views</th>
                         <th className="py-3 px-4">Status</th>
                         <th className="py-3 px-4 text-right">Quick Edit</th>
                       </tr>
@@ -1738,6 +1740,24 @@ export default function Home() {
                                   ({item.sold} sold)
                                 </span>
                               </div>
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200"
+                                  title="Product Page Views on eBay"
+                                >
+                                  <Eye className="w-3 h-3 text-blue-500" />
+                                  <span>{item.views !== undefined ? item.views : 0} views</span>
+                                </span>
+                                {Boolean(item.watchers) && (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200"
+                                    title="Watchers on eBay"
+                                  >
+                                    <Heart className="w-3 h-3 text-rose-500 fill-rose-500" />
+                                    <span>{item.watchers}</span>
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             <td className="py-3 px-4">
@@ -1806,15 +1826,17 @@ export default function Home() {
                                 )}
                               </button>
 
-                              {/* Reschedule Button */}
-                              <button
-                                onClick={() => openRescheduleModal(item)}
-                                className="bg-purple-50 hover:bg-purple-100 text-purple-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-purple-200 transition cursor-pointer inline-flex items-center gap-1"
-                                title="Change scheduled go-live date & time"
-                              >
-                                <Clock className="w-3 h-3 text-purple-600" />
-                                <span>{item.scheduledTime ? 'Change Schedule' : 'Schedule'}</span>
-                              </button>
+                              {/* Reschedule Button - Only show for draft/unpublished items, never for active eBay live listings */}
+                              {!isListingLive(item) && (
+                                <button
+                                  onClick={() => openRescheduleModal(item)}
+                                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-purple-200 transition cursor-pointer inline-flex items-center gap-1"
+                                  title="Change scheduled go-live date & time"
+                                >
+                                  <Clock className="w-3 h-3 text-purple-600" />
+                                  <span>{item.scheduledTime ? 'Change Schedule' : 'Schedule'}</span>
+                                </button>
+                              )}
 
                               <button
                                 onClick={() => openEditModal(item)}
