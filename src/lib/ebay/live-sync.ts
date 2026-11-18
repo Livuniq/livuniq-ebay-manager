@@ -1160,7 +1160,8 @@ function mergeThreadMessages(existing: EbayMessage[], incoming: EbayMessage[]): 
 }
 
 // 7. Sync Buyer Messages directly from eBay Trading API (GetMemberMessages & GetMyMessages)
-export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<number> {
+// Supports deep historical sync up to 1 full year (365 days) across multi-window chunks
+export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack = 365): Promise<number> {
   const store = getStore();
   let accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
   const masterConfig = store.masterConfig;
@@ -1176,150 +1177,176 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
   const siteId = account.marketplace === 'EBAY_GB' ? '3' : account.marketplace === 'EBAY_DE' ? '77' : '0';
   const newThreadsMap = new Map<string, EbayMessageThread>();
 
-  // A. Fetch AskSellerQuestion / Member Messages via GetMemberMessages
-  try {
-    const endIso = new Date().toISOString();
-    const startIso = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  // Generate 89-day chunk time windows up to daysBack (eBay maximum per GetMemberMessages call is 90 days)
+  const now = Date.now();
+  const clampedDays = Math.min(Math.max(daysBack, 30), 365);
+  const earliestTime = now - clampedDays * 24 * 60 * 60 * 1000;
+  const timeWindows: { startIso: string; endIso: string }[] = [];
+  let currentEnd = now;
 
-    const makeMemberMessagesXml = (msgType: string) => `<?xml version="1.0" encoding="utf-8"?>
+  while (currentEnd > earliestTime) {
+    const currentStart = Math.max(earliestTime, currentEnd - 89 * 24 * 60 * 60 * 1000);
+    timeWindows.push({
+      startIso: new Date(currentStart).toISOString(),
+      endIso: new Date(currentEnd).toISOString(),
+    });
+    currentEnd = currentStart;
+  }
+
+  // A. Fetch Member Messages across each historical time window
+  for (const window of timeWindows) {
+    let pageNumber = 1;
+    let hasMorePages = true;
+
+    while (hasMorePages && pageNumber <= 3) {
+      try {
+        const makeMemberMessagesXml = (msgType: string, page: number) => `<?xml version="1.0" encoding="utf-8"?>
 <GetMemberMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <MailMessageType>${msgType}</MailMessageType>
   <DetailLevel>ReturnAll</DetailLevel>
-  <StartCreationTime>${startIso}</StartCreationTime>
-  <EndCreationTime>${endIso}</EndCreationTime>
+  <StartCreationTime>${window.startIso}</StartCreationTime>
+  <EndCreationTime>${window.endIso}</EndCreationTime>
   <Pagination>
-    <EntriesPerPage>50</EntriesPerPage>
-    <PageNumber>1</PageNumber>
+    <EntriesPerPage>100</EntriesPerPage>
+    <PageNumber>${page}</PageNumber>
   </Pagination>
 </GetMemberMessagesRequest>`;
 
-    let res = await fetch(tradingUrl, {
-      method: 'POST',
-      headers: {
-        'X-EBAY-API-SITEID': siteId,
-        'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
-        'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
-        'X-EBAY-API-IAF-TOKEN': accessToken,
-        'Content-Type': 'text/xml',
-      },
-      body: makeMemberMessagesXml('All'),
-    });
-
-    let respXml = await res.text();
-
-    if (respXml.includes('IAF token supplied is expired') || respXml.includes('21916984') || respXml.includes('931')) {
-      const freshToken = await ensureFreshAccessToken(account, true);
-      if (freshToken) {
-        accessToken = freshToken;
-        res = await fetch(tradingUrl, {
+        let res = await fetch(tradingUrl, {
           method: 'POST',
           headers: {
             'X-EBAY-API-SITEID': siteId,
             'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
             'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
-            'X-EBAY-API-IAF-TOKEN': freshToken,
+            'X-EBAY-API-IAF-TOKEN': accessToken,
             'Content-Type': 'text/xml',
           },
-          body: makeMemberMessagesXml('All'),
+          body: makeMemberMessagesXml('All', pageNumber),
         });
-        respXml = await res.text();
-      }
-    }
 
-    // If 'All' is disallowed by schema, retry with 'AskSellerQuestion'
-    if (respXml.includes('<SeverityCode>Error</SeverityCode>') && respXml.includes('MailMessageType')) {
-      res = await fetch(tradingUrl, {
-        method: 'POST',
-        headers: {
-          'X-EBAY-API-SITEID': siteId,
-          'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
-          'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
-          'X-EBAY-API-IAF-TOKEN': accessToken,
-          'Content-Type': 'text/xml',
-        },
-        body: makeMemberMessagesXml('AskSellerQuestion'),
-      });
-      respXml = await res.text();
-    }
+        let respXml = await res.text();
 
-    // Parse MemberMessageExchange nodes
-    const exchangeRegex = /<MemberMessageExchange>([\s\S]*?)<\/MemberMessageExchange>/g;
-    let exMatch;
-    while ((exMatch = exchangeRegex.exec(respXml)) !== null) {
-      const block = exMatch[1];
-      const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
-      const itemTitle = decodeXmlEntities(block.match(/<Title>([^<]+)<\/Title>/)?.[1] || '');
-      const senderId = block.match(/<SenderID>([^<]+)<\/SenderID>/)?.[1] || 'buyer';
-      const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || 'Inquiry regarding listing');
-      const body = decodeXmlEntities(block.match(/<Body>([\s\S]*?)<\/Body>/)?.[1] || '');
-      const messageId = block.match(/<MessageID>([^<]+)<\/MessageID>/)?.[1] || `${Date.now()}`;
-      const creationDate = block.match(/<CreationDate>([^<]+)<\/CreationDate>/)?.[1] || new Date().toISOString();
-      const status = block.match(/<MessageStatus>([^<]+)<\/MessageStatus>/)?.[1] || 'Unanswered';
-      const isUnanswered = status.toLowerCase() === 'unanswered';
-
-      // Parse full conversation history turns from the message body
-      const parsedHistory = parseChatHistoryFromEbayText(
-        body || subject,
-        senderId,
-        account.ebayUsername || 'Seller',
-        messageId,
-        creationDate
-      );
-
-      // Check for explicit seller response in XML
-      const responseMatch = block.match(/<Response>([\s\S]*?)<\/Response>/);
-      if (responseMatch) {
-        parsedHistory.push({
-          id: `msg-resp-${messageId}`,
-          sender: account.ebayUsername || 'Seller',
-          senderRole: 'SELLER',
-          timestamp: creationDate,
-          body: decodeXmlEntities(responseMatch[1]),
-        });
-      }
-
-      // Group conversation by buyer username + item id so all turns stay in ONE thread
-      const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
-      const thrId = `thr-ebay-${account.id}-${senderId.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
-
-      if (newThreadsMap.has(thrId)) {
-        const existingThr = newThreadsMap.get(thrId)!;
-        existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
-        const lastMsg = existingThr.messages[existingThr.messages.length - 1];
-        if (lastMsg) {
-          existingThr.lastMessageSnippet = lastMsg.body.slice(0, 120);
-          existingThr.lastUpdated = lastMsg.timestamp;
+        if (respXml.includes('IAF token supplied is expired') || respXml.includes('21916984') || respXml.includes('931')) {
+          const freshToken = await ensureFreshAccessToken(account, true);
+          if (freshToken) {
+            accessToken = freshToken;
+            res = await fetch(tradingUrl, {
+              method: 'POST',
+              headers: {
+                'X-EBAY-API-SITEID': siteId,
+                'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+                'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
+                'X-EBAY-API-IAF-TOKEN': freshToken,
+                'Content-Type': 'text/xml',
+              },
+              body: makeMemberMessagesXml('All', pageNumber),
+            });
+            respXml = await res.text();
+          }
         }
-        if (isUnanswered) existingThr.unread = true;
-      } else {
-        const lastMsg = parsedHistory[parsedHistory.length - 1];
-        newThreadsMap.set(thrId, {
-          id: thrId,
-          accountId: account.id,
-          buyerUsername: senderId,
-          buyerName: senderId,
-          itemTitle: itemTitle || (itemId ? `Item #${itemId}` : undefined),
-          listingId: itemId ? `lst-${itemId}` : undefined,
-          subject: cleanSubject || subject,
-          lastMessageSnippet: (lastMsg?.body || body || subject).slice(0, 120),
-          lastUpdated: lastMsg?.timestamp || creationDate,
-          unread: isUnanswered,
-          messages: parsedHistory,
-        });
+
+        // If 'All' is disallowed by schema, retry with 'AskSellerQuestion'
+        if (respXml.includes('<SeverityCode>Error</SeverityCode>') && respXml.includes('MailMessageType')) {
+          res = await fetch(tradingUrl, {
+            method: 'POST',
+            headers: {
+              'X-EBAY-API-SITEID': siteId,
+              'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+              'X-EBAY-API-CALL-NAME': 'GetMemberMessages',
+              'X-EBAY-API-IAF-TOKEN': accessToken,
+              'Content-Type': 'text/xml',
+            },
+            body: makeMemberMessagesXml('AskSellerQuestion', pageNumber),
+          });
+          respXml = await res.text();
+        }
+
+        // Parse MemberMessageExchange nodes
+        const exchangeRegex = /<MemberMessageExchange>([\s\S]*?)<\/MemberMessageExchange>/g;
+        let exMatch;
+        let matchesFound = 0;
+        while ((exMatch = exchangeRegex.exec(respXml)) !== null) {
+          matchesFound++;
+          const block = exMatch[1];
+          const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
+          const itemTitle = decodeXmlEntities(block.match(/<Title>([^<]+)<\/Title>/)?.[1] || '');
+          const senderId = block.match(/<SenderID>([^<]+)<\/SenderID>/)?.[1] || 'buyer';
+          const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || 'Inquiry regarding listing');
+          const body = decodeXmlEntities(block.match(/<Body>([\s\S]*?)<\/Body>/)?.[1] || '');
+          const messageId = block.match(/<MessageID>([^<]+)<\/MessageID>/)?.[1] || `${Date.now()}`;
+          const creationDate = block.match(/<CreationDate>([^<]+)<\/CreationDate>/)?.[1] || new Date().toISOString();
+          const status = block.match(/<MessageStatus>([^<]+)<\/MessageStatus>/)?.[1] || 'Unanswered';
+          const isUnanswered = status.toLowerCase() === 'unanswered';
+
+          const parsedHistory = parseChatHistoryFromEbayText(
+            body || subject,
+            senderId,
+            account.ebayUsername || 'Seller',
+            messageId,
+            creationDate
+          );
+
+          const responseMatch = block.match(/<Response>([\s\S]*?)<\/Response>/);
+          if (responseMatch) {
+            parsedHistory.push({
+              id: `msg-resp-${messageId}`,
+              sender: account.ebayUsername || 'Seller',
+              senderRole: 'SELLER',
+              timestamp: creationDate,
+              body: decodeXmlEntities(responseMatch[1]),
+            });
+          }
+
+          const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
+          const thrId = `thr-ebay-${account.id}-${senderId.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
+
+          if (newThreadsMap.has(thrId)) {
+            const existingThr = newThreadsMap.get(thrId)!;
+            existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
+            const lastMsg = existingThr.messages[existingThr.messages.length - 1];
+            if (lastMsg) {
+              existingThr.lastMessageSnippet = lastMsg.body.slice(0, 120);
+              existingThr.lastUpdated = lastMsg.timestamp;
+            }
+            if (isUnanswered) existingThr.unread = true;
+          } else {
+            const lastMsg = parsedHistory[parsedHistory.length - 1];
+            newThreadsMap.set(thrId, {
+              id: thrId,
+              accountId: account.id,
+              buyerUsername: senderId,
+              buyerName: senderId,
+              itemTitle: itemTitle || (itemId ? `Item #${itemId}` : undefined),
+              listingId: itemId ? `lst-${itemId}` : undefined,
+              subject: cleanSubject || subject,
+              lastMessageSnippet: (lastMsg?.body || body || subject).slice(0, 120),
+              lastUpdated: lastMsg?.timestamp || creationDate,
+              unread: isUnanswered,
+              messages: parsedHistory,
+            });
+          }
+        }
+
+        const hasMoreMatch = respXml.match(/<HasMoreItems>([^<]+)<\/HasMoreItems>/i);
+        hasMorePages = Boolean(hasMoreMatch && hasMoreMatch[1]?.toLowerCase() === 'true' && matchesFound > 0);
+        pageNumber++;
+      } catch (err) {
+        console.error('Error fetching GetMemberMessages window:', window, err);
+        hasMorePages = false;
       }
     }
-  } catch (err) {
-    console.error('Error fetching GetMemberMessages:', err);
   }
 
-  // B. Also query GetMyMessages to capture seller inbox messages & threads
+  // B. Query GetMyMessages to capture official seller inbox headers & message bodies
   try {
-    const getMyMessagesXml = `<?xml version="1.0" encoding="utf-8"?>
+    const getHeadersXml = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-  <DetailLevel>ReturnMessages</DetailLevel>
+  <DetailLevel>ReturnHeaders</DetailLevel>
+  <StartTime>${new Date(earliestTime).toISOString()}</StartTime>
+  <EndTime>${new Date(now).toISOString()}</EndTime>
 </GetMyMessagesRequest>`;
 
-    const myMsgRes = await fetch(tradingUrl, {
+    const headersRes = await fetch(tradingUrl, {
       method: 'POST',
       headers: {
         'X-EBAY-API-SITEID': siteId,
@@ -1328,66 +1355,100 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
         'X-EBAY-API-IAF-TOKEN': accessToken,
         'Content-Type': 'text/xml',
       },
-      body: getMyMessagesXml,
+      body: getHeadersXml,
     });
 
-    const myMsgXml = await myMsgRes.text();
-    const msgRegex = /<Message>([\s\S]*?)<\/Message>/g;
-    let mMatch;
-    while ((mMatch = msgRegex.exec(myMsgXml)) !== null) {
-      const block = mMatch[1];
-      const messageId = block.match(/<MessageID>([^<]+)<\/MessageID>/)?.[1] || '';
-      if (!messageId) continue;
+    const headersXml = await headersRes.text();
+    const idRegex = /<MessageID>([^<]+)<\/MessageID>/g;
+    const allMsgIds: string[] = [];
+    let idMatch;
+    while ((idMatch = idRegex.exec(headersXml)) !== null) {
+      allMsgIds.push(idMatch[1]);
+    }
 
-      const sender = block.match(/<Sender>([^<]+)<\/Sender>/)?.[1] || 'eBay Member';
-      // Filter out pure automated notices unless they relate to an item
-      if (sender.toLowerCase() === 'ebay' && !block.includes('<ItemID>')) continue;
+    // Batch query ReturnMessages in chunks of up to 10 (maximum eBay limit per call)
+    // Take up to 100 most recent message IDs
+    const targetIds = allMsgIds.slice(0, 100);
+    const chunkSize = 10;
+    for (let i = 0; i < targetIds.length; i += chunkSize) {
+      const chunk = targetIds.slice(i, i + chunkSize);
+      const getDetailXml = `<?xml version="1.0" encoding="utf-8"?>
+<GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <DetailLevel>ReturnMessages</DetailLevel>
+  <MessageIDs>
+    ${chunk.map((id) => `<MessageID>${id}</MessageID>`).join('')}
+  </MessageIDs>
+</GetMyMessagesRequest>`;
 
-      const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || `Message from ${sender}`);
-      const textRaw = block.match(/<Text>([\s\S]*?)<\/Text>/)?.[1] || '';
-      const receiveDate = block.match(/<ReceiveDate>([^<]+)<\/ReceiveDate>/)?.[1] || new Date().toISOString();
-      const read = block.match(/<Read>([^<]+)<\/Read>/)?.[1] === 'true';
-      const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
+      const detailRes = await fetch(tradingUrl, {
+        method: 'POST',
+        headers: {
+          'X-EBAY-API-SITEID': siteId,
+          'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+          'X-EBAY-API-CALL-NAME': 'GetMyMessages',
+          'X-EBAY-API-IAF-TOKEN': accessToken,
+          'Content-Type': 'text/xml',
+        },
+        body: getDetailXml,
+      });
 
-      const parsedHistory = parseChatHistoryFromEbayText(
-        textRaw || subject,
-        sender,
-        account.ebayUsername || 'Seller',
-        messageId,
-        receiveDate
-      );
+      const detailXml = await detailRes.text();
+      const msgRegex = /<Message>([\s\S]*?)<\/Message>/g;
+      let mMatch;
+      while ((mMatch = msgRegex.exec(detailXml)) !== null) {
+        const block = mMatch[1];
+        const messageId = block.match(/<MessageID>([^<]+)<\/MessageID>/)?.[1] || '';
+        if (!messageId) continue;
 
-      const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
-      const thrId = `thr-ebay-${account.id}-${sender.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
+        const sender = block.match(/<Sender>([^<]+)<\/Sender>/)?.[1] || 'eBay Member';
+        if (sender.toLowerCase() === 'ebay' && !block.includes('<ItemID>')) continue;
 
-      if (newThreadsMap.has(thrId)) {
-        const existingThr = newThreadsMap.get(thrId)!;
-        existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
-        const lastMsg = existingThr.messages[existingThr.messages.length - 1];
-        if (lastMsg) {
-          existingThr.lastMessageSnippet = lastMsg.body.slice(0, 120);
-          existingThr.lastUpdated = lastMsg.timestamp;
+        const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || `Message from ${sender}`);
+        const textRaw = block.match(/<Text>([\s\S]*?)<\/Text>/)?.[1] || '';
+        const receiveDate = block.match(/<ReceiveDate>([^<]+)<\/ReceiveDate>/)?.[1] || new Date().toISOString();
+        const read = block.match(/<Read>([^<]+)<\/Read>/)?.[1] === 'true';
+        const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
+
+        const parsedHistory = parseChatHistoryFromEbayText(
+          textRaw || subject,
+          sender,
+          account.ebayUsername || 'Seller',
+          messageId,
+          receiveDate
+        );
+
+        const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
+        const thrId = `thr-ebay-${account.id}-${sender.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
+
+        if (newThreadsMap.has(thrId)) {
+          const existingThr = newThreadsMap.get(thrId)!;
+          existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
+          const lastMsg = existingThr.messages[existingThr.messages.length - 1];
+          if (lastMsg) {
+            existingThr.lastMessageSnippet = lastMsg.body.slice(0, 120);
+            existingThr.lastUpdated = lastMsg.timestamp;
+          }
+          if (!read) existingThr.unread = true;
+        } else {
+          const lastMsg = parsedHistory[parsedHistory.length - 1];
+          newThreadsMap.set(thrId, {
+            id: thrId,
+            accountId: account.id,
+            buyerUsername: sender,
+            buyerName: sender,
+            itemTitle: itemId ? `Listing #${itemId}` : undefined,
+            listingId: itemId ? `lst-${itemId}` : undefined,
+            subject: cleanSubject || subject,
+            lastMessageSnippet: (lastMsg?.body || subject).slice(0, 120),
+            lastUpdated: lastMsg?.timestamp || receiveDate,
+            unread: !read,
+            messages: parsedHistory,
+          });
         }
-        if (!read) existingThr.unread = true;
-      } else {
-        const lastMsg = parsedHistory[parsedHistory.length - 1];
-        newThreadsMap.set(thrId, {
-          id: thrId,
-          accountId: account.id,
-          buyerUsername: sender,
-          buyerName: sender,
-          itemTitle: itemId ? `Listing #${itemId}` : undefined,
-          listingId: itemId ? `lst-${itemId}` : undefined,
-          subject: cleanSubject || subject,
-          lastMessageSnippet: (lastMsg?.body || subject).slice(0, 120),
-          lastUpdated: lastMsg?.timestamp || receiveDate,
-          unread: !read,
-          messages: parsedHistory,
-        });
       }
     }
   } catch (err) {
-    console.error('Error fetching GetMyMessages:', err);
+    console.error('Error fetching GetMyMessages historical batch:', err);
   }
 
   // C. Merge into store.threads preserving any existing seller replies

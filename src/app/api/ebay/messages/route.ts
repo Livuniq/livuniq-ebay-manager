@@ -8,6 +8,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const accountId = searchParams.get('accountId') || undefined;
     const doSync = searchParams.get('sync') === 'true';
+    const days = parseInt(searchParams.get('days') || '365');
 
     const store = getStore();
     const targetAccountId = accountId || store.activeAccountId;
@@ -16,7 +17,7 @@ export async function GET(request: Request) {
     let liveSyncedCount = 0;
     if (doSync && account && account.accessToken) {
       try {
-        liveSyncedCount = await syncLiveEbayMessages(account);
+        liveSyncedCount = await syncLiveEbayMessages(account, days);
       } catch (syncErr) {
         console.error('Error syncing live messages in GET /api/ebay/messages:', syncErr);
       }
@@ -47,7 +48,8 @@ export async function POST(request: Request) {
         });
       }
 
-      const count = await syncLiveEbayMessages(account);
+      const days = parseInt(body.days || '365');
+      const count = await syncLiveEbayMessages(account, days);
       const threads = getMessageThreads(targetAccountId);
       return NextResponse.json({
         success: true,

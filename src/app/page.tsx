@@ -826,11 +826,11 @@ export default function Home() {
   const [isSyncingMessages, setIsSyncingMessages] = useState(false);
   const [msgSyncStatus, setMsgSyncStatus] = useState<string | null>(null);
 
-  const handleSyncMessages = async (forceSync = true) => {
+  const handleSyncMessages = async (forceSync = true, days = 365) => {
     setIsSyncingMessages(true);
     setMsgSyncStatus(null);
     try {
-      const res = await fetch(`/api/ebay/messages?accountId=${activeAccountId || ''}&sync=${forceSync ? 'true' : 'false'}`);
+      const res = await fetch(`/api/ebay/messages?accountId=${activeAccountId || ''}&sync=${forceSync ? 'true' : 'false'}&days=${days}`);
       const data = await res.json();
       if (data.success && Array.isArray(data.threads)) {
         setThreads(data.threads);
@@ -840,16 +840,16 @@ export default function Home() {
         if (data.liveSyncedCount !== undefined) {
           setMsgSyncStatus(
             data.liveSyncedCount > 0
-              ? `✅ ${data.liveSyncedCount} live messages fetched from eBay!`
-              : '✅ Inbox synchronized: all eBay messages up-to-date.'
+              ? `✅ ${data.liveSyncedCount} conversations synchronized from past 1 year!`
+              : '✅ Inbox synchronized: all historical eBay conversations up-to-date.'
           );
-          setTimeout(() => setMsgSyncStatus(null), 4000);
+          setTimeout(() => setMsgSyncStatus(null), 5000);
         }
       }
     } catch (err) {
       console.error('Failed to sync messages:', err);
       setMsgSyncStatus('❌ Sync failed. Please verify store connection.');
-      setTimeout(() => setMsgSyncStatus(null), 4000);
+      setTimeout(() => setMsgSyncStatus(null), 5000);
     } finally {
       setIsSyncingMessages(false);
     }
@@ -858,7 +858,7 @@ export default function Home() {
   // Auto-sync live messages when opening the messages tab
   useEffect(() => {
     if (activeTab === 'messages' && activeAccount?.accessToken) {
-      handleSyncMessages(true);
+      handleSyncMessages(true, 365);
     }
   }, [activeTab, activeAccountId]);
 
@@ -1949,13 +1949,13 @@ export default function Home() {
                   </div>
                   <div className="flex items-center space-x-1.5">
                     <button
-                      onClick={() => handleSyncMessages(true)}
+                      onClick={() => handleSyncMessages(true, 365)}
                       disabled={isSyncingMessages}
                       className="text-[11px] font-medium bg-white hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
-                      title="Sync live messages directly from eBay inbox"
+                      title="Sync all historical messages from past 1 year"
                     >
                       <RefreshCw className={`w-3 h-3 ${isSyncingMessages ? 'animate-spin' : ''}`} />
-                      <span>{isSyncingMessages ? 'Syncing...' : 'Sync eBay Inbox'}</span>
+                      <span>{isSyncingMessages ? 'Syncing...' : 'Sync eBay Inbox (Full 1 Yr)'}</span>
                     </button>
                     <button
                       onClick={handleSimulateMessage}
