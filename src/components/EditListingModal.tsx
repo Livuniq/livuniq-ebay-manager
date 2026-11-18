@@ -25,7 +25,7 @@ import {
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
 import { EBAY_JEWELRY_CATEGORIES, EBAY_FILE_EXCHANGE_CONDITIONS } from '@/lib/ebay/constants';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
-import { isVideoMedia } from '@/lib/ebay/template-engine';
+import { isVideoMedia, updateDescriptionImages } from '@/lib/ebay/template-engine';
 import HtmlTemplateSection from './HtmlTemplateSection';
 import BusinessPoliciesSelector from './BusinessPoliciesSelector';
 
@@ -284,8 +284,10 @@ export default function EditListingModal({
 
       if (newUrls.length > 0) {
         // Remove old images completely and replace with new images from folder!
+        const oldImgs = [...images];
         setImages(newUrls);
-        setSuccessMessage(`All old images removed! Replaced with ${newUrls.length} photos from folder.`);
+        setDescription((prev) => updateDescriptionImages(prev, newUrls, oldImgs));
+        setSuccessMessage(`All old images removed! Replaced with ${newUrls.length} photos from folder, and HTML description updated.`);
       }
     } catch (err: any) {
       setErrorMessage((err as Error).message);

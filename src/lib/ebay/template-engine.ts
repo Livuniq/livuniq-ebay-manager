@@ -536,3 +536,54 @@ export const DEFAULT_TEMPLATES: DescriptionTemplate[] = [
 </div>`,
   },
 ];
+
+// Update all images embedded in an HTML description (including #gallBlock, gallery grids, and <img> tags)
+export function updateDescriptionImages(
+  description?: string | null,
+  newImages: string[] = [],
+  oldImages: string[] = []
+): string {
+  if (!description || typeof description !== 'string') return '';
+  let updated = description;
+
+  const validNew = newImages
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter((u) => Boolean(u) && !isVideoMedia(u));
+
+  if (validNew.length === 0) return updated;
+
+  // 1. Replace #gallBlock pure-CSS gallery (with preceding <style> if present, or standalone #gallBlock)
+  const fullGallBlockRegex = /<style>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*<div[^>]*id=["']gallBlock["'][^>]*>[\s\S]*?id=["']gallThumbs["'][\s\S]*?<\/div>\s*<\/div>/i;
+  const bareGallBlockRegex = /<div[^>]*id=["']gallBlock["'][^>]*>[\s\S]*?id=["']gallThumbs["'][\s\S]*?<\/div>\s*<\/div>/i;
+
+  const newGallHtml = generateRadioGalleryHtml(validNew);
+
+  if (fullGallBlockRegex.test(updated)) {
+    updated = updated.replace(fullGallBlockRegex, newGallHtml);
+  } else if (bareGallBlockRegex.test(updated)) {
+    updated = updated.replace(bareGallBlockRegex, newGallHtml);
+  }
+
+  // 2. Direct replacement of any known old images in the HTML description
+  const validOld = oldImages
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter((u) => Boolean(u) && !isVideoMedia(u));
+
+  for (let i = 0; i < validOld.length; i++) {
+    const oldUrl = validOld[i];
+    if (!oldUrl) continue;
+    const replacement = validNew[i] || validNew[0];
+    updated = updated.split(oldUrl).join(replacement);
+  }
+
+  // 3. Replace any IMG_1..12 or THUMB_1..12 or {{IMAGE_1}} / {{MAIN_IMAGE}}
+  updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, validNew[0]);
+  for (let i = 1; i <= 12; i++) {
+    const replacement = validNew[i - 1] || validNew[0];
+    updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), replacement);
+    updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), replacement);
+    updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), replacement);
+  }
+
+  return updated;
+}

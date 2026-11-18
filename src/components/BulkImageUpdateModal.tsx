@@ -20,6 +20,7 @@ import {
   Info,
 } from 'lucide-react';
 import { EbayListing, ConnectedAccount } from '@/lib/ebay/types';
+import { updateDescriptionImages } from '@/lib/ebay/template-engine';
 
 interface BulkImageUpdateModalProps {
   isOpen: boolean;
@@ -338,6 +339,7 @@ export default function BulkImageUpdateModal({
           ...existing,
           images: newUrls,
           imageUrl: newUrls[0] || existing.imageUrl,
+          description: updateDescriptionImages(existing.description, newUrls, existing.images),
           hasUnpublishedChanges: !pushLiveToEbay,
           lastUpdated: new Date().toISOString(),
         };

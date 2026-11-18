@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getStore, saveStoreAsync, ensureStoreAsync, getActiveAccountId } from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
-import { isVideoMedia } from '@/lib/ebay/template-engine';
+import { isVideoMedia, updateDescriptionImages } from '@/lib/ebay/template-engine';
 
 export async function POST(request: Request) {
   try {
@@ -102,8 +102,20 @@ export async function POST(request: Request) {
       }
 
       // 1. COMPLETELY REMOVE OLD IMAGES AND REPLACE WITH NEW ONES
+      const oldImages = listing.images && listing.images.length > 0
+        ? [...listing.images]
+        : listing.imageUrl
+        ? [listing.imageUrl]
+        : [];
+
       listing.images = [...validNewImages];
       listing.imageUrl = validNewImages[0];
+
+      // 1b. Update HTML Description so that the template (#gallBlock, carousels, and <img>) renders the new images!
+      if (listing.description) {
+        listing.description = updateDescriptionImages(listing.description, validNewImages, oldImages);
+      }
+
       listing.hasUnpublishedChanges = true;
       listing.lastUpdated = new Date().toISOString();
 
@@ -122,7 +134,10 @@ export async function POST(request: Request) {
           const reviseRes = await reviseLiveEbayListing(
             account,
             listing.ebayListingId.replace(/^#/, '').trim(),
-            { images: validNewImages }
+            {
+              images: validNewImages,
+              description: listing.description,
+            }
           );
 
           if (reviseRes.success) {
