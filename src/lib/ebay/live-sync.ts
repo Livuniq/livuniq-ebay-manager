@@ -1024,6 +1024,141 @@ function encodeXmlEntities(str: string): string {
     .replace(/'/g, '&apos;');
 }
 
+// Helper: Parse historical back-and-forth chat conversation from eBay message text/body
+export function parseChatHistoryFromEbayText(
+  rawText: string,
+  buyerUsername: string,
+  sellerUsername: string,
+  messageId: string,
+  messageDate: string
+): EbayMessage[] {
+  if (!rawText || !rawText.trim()) return [];
+
+  // 1. Clean HTML tags and decode entities
+  let cleaned = decodeXmlEntities(rawText)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, '\n--- Original Message ---\n$1\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .trim();
+
+  // Common eBay thread reply delimiters
+  const splitPattern = /(?:-{3,}\s*(?:Original|Previous)\s*Message\s*-{3,}|\r?\n-{4,}\r?\n|On\s+[\w\s,:]+\s+wrote:|From:\s*[^\r\n<]+\s*(?:Sent|To):)/i;
+
+  if (!splitPattern.test(cleaned)) {
+    return [
+      {
+        id: `msg-${messageId}`,
+        sender: buyerUsername,
+        senderRole: 'BUYER',
+        timestamp: messageDate,
+        body: cleaned,
+      },
+    ];
+  }
+
+  // Split on delimiter
+  const rawParts = cleaned.split(/(?:-{3,}\s*(?:Original|Previous)\s*Message\s*-{3,}|\r?\n-{4,}\r?\n|On\s+[\w\s,:]+\s+wrote:)/i);
+  const parsedMsgs: EbayMessage[] = [];
+
+  let turnIndex = 0;
+  for (const part of rawParts) {
+    const trimmed = part.trim();
+    if (!trimmed || trimmed.length < 2) continue;
+
+    let sender = buyerUsername;
+    let senderRole: 'BUYER' | 'SELLER' = 'BUYER';
+    let turnTime = messageDate;
+    let turnBody = trimmed;
+
+    // Detect sender from "From: <name>" or "Sender: <name>"
+    const fromMatch = turnBody.match(/(?:From|Sender):\s*([^\r\n<]+)/i);
+    if (fromMatch && fromMatch[1]) {
+      const fromName = fromMatch[1].trim();
+      if (
+        (sellerUsername && fromName.toLowerCase().includes(sellerUsername.toLowerCase())) ||
+        fromName.toLowerCase().includes('seller')
+      ) {
+        sender = sellerUsername || 'Seller';
+        senderRole = 'SELLER';
+      } else {
+        sender = fromName || buyerUsername;
+        senderRole = 'BUYER';
+      }
+    } else {
+      // If no explicit From header: alternating turns (turn 0 is newest, turn 1 is previous reply)
+      if (turnIndex % 2 === 1) {
+        sender = sellerUsername || 'Seller';
+        senderRole = 'SELLER';
+      }
+    }
+
+    // Detect timestamp from "Sent: <date>"
+    const sentMatch = turnBody.match(/Sent:\s*([^\r\n<]+)/i);
+    if (sentMatch && sentMatch[1]) {
+      const parsedSent = Date.parse(sentMatch[1].trim());
+      if (!isNaN(parsedSent)) {
+        turnTime = new Date(parsedSent).toISOString();
+      }
+    }
+
+    // Clean out metadata header noise from the message bubble text
+    turnBody = turnBody
+      .replace(/From:\s*[^\r\n<]+/gi, '')
+      .replace(/To:\s*[^\r\n<]+/gi, '')
+      .replace(/Sent:\s*[^\r\n<]+/gi, '')
+      .replace(/Subject:\s*[^\r\n<]+/gi, '')
+      .replace(/Item Title:\s*[^\r\n<]+/gi, '')
+      .replace(/Item Number:\s*[^\r\n<]+/gi, '')
+      .trim();
+
+    if (turnBody && turnBody.length > 1) {
+      parsedMsgs.push({
+        id: `msg-${messageId}-${turnIndex}`,
+        sender,
+        senderRole,
+        timestamp: turnTime,
+        body: turnBody,
+      });
+      turnIndex++;
+    }
+  }
+
+  // Quoted text was ordered from newest to oldest. Reverse to display in chronological conversation order.
+  return parsedMsgs.length > 0 ? parsedMsgs.reverse() : [
+    {
+      id: `msg-${messageId}`,
+      sender: buyerUsername,
+      senderRole: 'BUYER',
+      timestamp: messageDate,
+      body: cleaned,
+    },
+  ];
+}
+
+// Helper: Safely merge conversation messages without dropping past replies
+function mergeThreadMessages(existing: EbayMessage[], incoming: EbayMessage[]): EbayMessage[] {
+  const map = new Map<string, EbayMessage>();
+  const norm = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  for (const m of existing) {
+    const key = `${m.senderRole}-${norm(m.body)}`;
+    map.set(key, m);
+  }
+
+  for (const m of incoming) {
+    const key = `${m.senderRole}-${norm(m.body)}`;
+    if (!map.has(key)) {
+      map.set(key, m);
+    }
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+}
+
 // 7. Sync Buyer Messages directly from eBay Trading API (GetMemberMessages & GetMyMessages)
 export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<number> {
   const store = getStore();
@@ -1039,7 +1174,7 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
     : 'https://api.ebay.com/ws/api.dll';
 
   const siteId = account.marketplace === 'EBAY_GB' ? '3' : account.marketplace === 'EBAY_DE' ? '77' : '0';
-  const newThreads: EbayMessageThread[] = [];
+  const newThreadsMap = new Map<string, EbayMessageThread>();
 
   // A. Fetch AskSellerQuestion / Member Messages via GetMemberMessages
   try {
@@ -1122,21 +1257,19 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
       const status = block.match(/<MessageStatus>([^<]+)<\/MessageStatus>/)?.[1] || 'Unanswered';
       const isUnanswered = status.toLowerCase() === 'unanswered';
 
-      const thrId = `thr-ebay-${messageId}`;
-      const msgs: EbayMessage[] = [
-        {
-          id: `msg-${messageId}`,
-          sender: senderId,
-          senderRole: 'BUYER',
-          timestamp: creationDate,
-          body: body || subject,
-        },
-      ];
+      // Parse full conversation history turns from the message body
+      const parsedHistory = parseChatHistoryFromEbayText(
+        body || subject,
+        senderId,
+        account.ebayUsername || 'Seller',
+        messageId,
+        creationDate
+      );
 
-      // Check for seller response
+      // Check for explicit seller response in XML
       const responseMatch = block.match(/<Response>([\s\S]*?)<\/Response>/);
       if (responseMatch) {
-        msgs.push({
+        parsedHistory.push({
           id: `msg-resp-${messageId}`,
           sender: account.ebayUsername || 'Seller',
           senderRole: 'SELLER',
@@ -1145,25 +1278,41 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
         });
       }
 
-      newThreads.push({
-        id: thrId,
-        accountId: account.id,
-        buyerUsername: senderId,
-        buyerName: senderId,
-        itemTitle: itemTitle || (itemId ? `Item #${itemId}` : undefined),
-        listingId: itemId ? `lst-${itemId}` : undefined,
-        subject,
-        lastMessageSnippet: (body || subject).slice(0, 120),
-        lastUpdated: creationDate,
-        unread: isUnanswered,
-        messages: msgs,
-      });
+      // Group conversation by buyer username + item id so all turns stay in ONE thread
+      const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
+      const thrId = `thr-ebay-${account.id}-${senderId.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
+
+      if (newThreadsMap.has(thrId)) {
+        const existingThr = newThreadsMap.get(thrId)!;
+        existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
+        const lastMsg = existingThr.messages[existingThr.messages.length - 1];
+        if (lastMsg) {
+          existingThr.lastMessageSnippet = lastMsg.body.slice(0, 120);
+          existingThr.lastUpdated = lastMsg.timestamp;
+        }
+        if (isUnanswered) existingThr.unread = true;
+      } else {
+        const lastMsg = parsedHistory[parsedHistory.length - 1];
+        newThreadsMap.set(thrId, {
+          id: thrId,
+          accountId: account.id,
+          buyerUsername: senderId,
+          buyerName: senderId,
+          itemTitle: itemTitle || (itemId ? `Item #${itemId}` : undefined),
+          listingId: itemId ? `lst-${itemId}` : undefined,
+          subject: cleanSubject || subject,
+          lastMessageSnippet: (lastMsg?.body || body || subject).slice(0, 120),
+          lastUpdated: lastMsg?.timestamp || creationDate,
+          unread: isUnanswered,
+          messages: parsedHistory,
+        });
+      }
     }
   } catch (err) {
     console.error('Error fetching GetMemberMessages:', err);
   }
 
-  // B. Also query GetMyMessages to capture seller inbox messages
+  // B. Also query GetMyMessages to capture seller inbox messages & threads
   try {
     const getMyMessagesXml = `<?xml version="1.0" encoding="utf-8"?>
 <GetMyMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
@@ -1196,33 +1345,44 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
 
       const subject = decodeXmlEntities(block.match(/<Subject>([\s\S]*?)<\/Subject>/)?.[1] || `Message from ${sender}`);
       const textRaw = block.match(/<Text>([\s\S]*?)<\/Text>/)?.[1] || '';
-      const textClean = decodeXmlEntities(textRaw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
       const receiveDate = block.match(/<ReceiveDate>([^<]+)<\/ReceiveDate>/)?.[1] || new Date().toISOString();
       const read = block.match(/<Read>([^<]+)<\/Read>/)?.[1] === 'true';
       const itemId = block.match(/<ItemID>([^<]+)<\/ItemID>/)?.[1] || '';
 
-      const thrId = `thr-ebay-${messageId}`;
-      if (!newThreads.some((t) => t.id === thrId)) {
-        newThreads.push({
+      const parsedHistory = parseChatHistoryFromEbayText(
+        textRaw || subject,
+        sender,
+        account.ebayUsername || 'Seller',
+        messageId,
+        receiveDate
+      );
+
+      const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
+      const thrId = `thr-ebay-${account.id}-${sender.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
+
+      if (newThreadsMap.has(thrId)) {
+        const existingThr = newThreadsMap.get(thrId)!;
+        existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
+        const lastMsg = existingThr.messages[existingThr.messages.length - 1];
+        if (lastMsg) {
+          existingThr.lastMessageSnippet = lastMsg.body.slice(0, 120);
+          existingThr.lastUpdated = lastMsg.timestamp;
+        }
+        if (!read) existingThr.unread = true;
+      } else {
+        const lastMsg = parsedHistory[parsedHistory.length - 1];
+        newThreadsMap.set(thrId, {
           id: thrId,
           accountId: account.id,
           buyerUsername: sender,
           buyerName: sender,
           itemTitle: itemId ? `Listing #${itemId}` : undefined,
           listingId: itemId ? `lst-${itemId}` : undefined,
-          subject,
-          lastMessageSnippet: (textClean || subject).slice(0, 120),
-          lastUpdated: receiveDate,
+          subject: cleanSubject || subject,
+          lastMessageSnippet: (lastMsg?.body || subject).slice(0, 120),
+          lastUpdated: lastMsg?.timestamp || receiveDate,
           unread: !read,
-          messages: [
-            {
-              id: `msg-${messageId}`,
-              sender,
-              senderRole: 'BUYER',
-              timestamp: receiveDate,
-              body: textClean || subject,
-            },
-          ],
+          messages: parsedHistory,
         });
       }
     }
@@ -1230,23 +1390,32 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
     console.error('Error fetching GetMyMessages:', err);
   }
 
-  // C. Merge into store.threads
-  if (newThreads.length > 0) {
+  // C. Merge into store.threads preserving any existing seller replies
+  const newThreadsList = Array.from(newThreadsMap.values());
+  if (newThreadsList.length > 0) {
     const otherThreads = store.threads.filter((t) => t.accountId !== account.id);
     const existingAccountThreads = store.threads.filter((t) => t.accountId === account.id);
 
-    for (const newThr of newThreads) {
+    for (const incomingThr of newThreadsList) {
       const idx = existingAccountThreads.findIndex(
-        (t) => t.id === newThr.id || (t.buyerUsername === newThr.buyerUsername && t.subject === newThr.subject)
+        (t) =>
+          t.id === incomingThr.id ||
+          (t.buyerUsername.toLowerCase() === incomingThr.buyerUsername.toLowerCase() &&
+            (t.listingId === incomingThr.listingId || t.subject.toLowerCase() === incomingThr.subject.toLowerCase()))
       );
+
       if (idx >= 0) {
+        const mergedMsgs = mergeThreadMessages(existingAccountThreads[idx].messages, incomingThr.messages);
+        const lastMsg = mergedMsgs[mergedMsgs.length - 1];
         existingAccountThreads[idx] = {
           ...existingAccountThreads[idx],
-          ...newThr,
-          messages: newThr.messages.length >= existingAccountThreads[idx].messages.length ? newThr.messages : existingAccountThreads[idx].messages,
+          ...incomingThr,
+          messages: mergedMsgs,
+          lastMessageSnippet: lastMsg?.body?.slice(0, 120) || incomingThr.lastMessageSnippet,
+          lastUpdated: lastMsg?.timestamp || incomingThr.lastUpdated,
         };
       } else {
-        existingAccountThreads.unshift(newThr);
+        existingAccountThreads.unshift(incomingThr);
       }
     }
 
@@ -1254,7 +1423,7 @@ export async function syncLiveEbayMessages(account: ConnectedAccount): Promise<n
     await saveStoreAsync(store);
   }
 
-  return newThreads.length;
+  return newThreadsList.length;
 }
 
 // 8. Reply directly to buyer on live eBay via AddMemberMessageRTQ

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Package,
   ShoppingCart,
@@ -861,6 +861,13 @@ export default function Home() {
       handleSyncMessages(true);
     }
   }, [activeTab, activeAccountId]);
+
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [threads, selectedThreadId]);
 
   // Simulate an incoming buyer message for testing
   const [isSimulatingMessage, setIsSimulatingMessage] = useState(false);
@@ -2118,30 +2125,46 @@ export default function Home() {
                         </div>
 
                         {/* Messages Thread Scrollable Area */}
-                        <div className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3">
-                          {activeThread.messages.map((msg) => (
-                            <div
-                              key={msg.id}
-                              className={`flex flex-col ${
-                                msg.senderRole === 'SELLER' ? 'items-end' : 'items-start'
-                              }`}
-                            >
-                              <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 mb-1 px-1">
-                                <span className="font-semibold text-slate-600">{msg.sender}</span>
-                                <span>•</span>
-                                <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-                              <div
-                                className={`max-w-md p-3.5 rounded-2xl text-xs leading-relaxed ${
-                                  msg.senderRole === 'SELLER'
-                                    ? 'bg-blue-600 text-white rounded-tr-none shadow-sm'
-                                    : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none shadow-sm'
-                                }`}
-                              >
-                                {msg.body}
-                              </div>
-                            </div>
-                          ))}
+                        <div ref={chatScrollRef} className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3.5">
+                          {(() => {
+                            const sortedMsgs = [...activeThread.messages].sort(
+                              (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                            );
+
+                            return sortedMsgs.map((msg, idx) => {
+                              const isSeller = msg.senderRole === 'SELLER';
+                              return (
+                                <div
+                                  key={msg.id || idx}
+                                  className={`flex flex-col ${isSeller ? 'items-end' : 'items-start'}`}
+                                >
+                                  <div className="flex items-center space-x-1.5 text-[11px] text-slate-400 mb-1 px-1">
+                                    <span className={`font-bold ${isSeller ? 'text-blue-700' : 'text-slate-700'}`}>
+                                      {isSeller ? `${msg.sender} (You)` : msg.sender}
+                                    </span>
+                                    <span>•</span>
+                                    <span>
+                                      {new Date(msg.timestamp).toLocaleString(undefined, {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </span>
+                                  </div>
+                                  <div
+                                    className={`max-w-lg p-3.5 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap break-words ${
+                                      isSeller
+                                        ? 'bg-blue-600 text-white rounded-tr-none shadow-sm'
+                                        : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none shadow-sm'
+                                    }`}
+                                  >
+                                    {msg.body}
+                                  </div>
+                                </div>
+                              );
+                            });
+                          })()}
                         </div>
 
                         {/* Permanent Sticky Reply Form at Bottom */}
