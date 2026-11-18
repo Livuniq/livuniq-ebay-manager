@@ -5,12 +5,16 @@ export async function GET(request: Request) {
   const masterConfig = getMasterConfig();
   const { searchParams } = new URL(request.url);
 
-  // Auto-detect sandbox if the App ID has -SBX- or environment is sandbox
-  const isSandbox = Boolean(
-    masterConfig.masterAppId?.includes('-SBX-') ||
-    masterConfig.environment === 'sandbox' ||
-    searchParams.get('env') === 'sandbox'
-  );
+  const reqEnv = searchParams.get('env');
+  const isSandbox = reqEnv === 'sandbox' || (reqEnv !== 'production' && (masterConfig.environment === 'sandbox' || masterConfig.masterAppId?.includes('-SBX-')));
+
+  const effectiveAppId = isSandbox
+    ? (masterConfig.sandboxAppId || masterConfig.masterAppId)
+    : (masterConfig.productionAppId || masterConfig.masterAppId);
+
+  const effectiveRuName = isSandbox
+    ? (masterConfig.sandboxRuName || masterConfig.masterRuName)
+    : (masterConfig.productionRuName || masterConfig.masterRuName);
 
   const marketplace = searchParams.get('marketplace') || 'EBAY_US';
 
@@ -27,12 +31,12 @@ export async function GET(request: Request) {
     : 'https://auth.ebay.com/oauth2/authorize';
 
   // Check if live master keys are entered in Master API Setup
-  if (masterConfig.masterAppId && masterConfig.masterRuName) {
-    const state = JSON.stringify({ marketplace, t: Date.now() });
+  if (effectiveAppId && effectiveRuName) {
+    const state = JSON.stringify({ marketplace, env: isSandbox ? 'sandbox' : 'production', t: Date.now() });
     const ebayConsentUrl = `${authHost}?client_id=${encodeURIComponent(
-      masterConfig.masterAppId
+      effectiveAppId
     )}&response_type=code&redirect_uri=${encodeURIComponent(
-      masterConfig.masterRuName
+      effectiveRuName
     )}&scope=${encodeURIComponent(scopes)}&state=${encodeURIComponent(state)}`;
 
     return NextResponse.redirect(ebayConsentUrl);

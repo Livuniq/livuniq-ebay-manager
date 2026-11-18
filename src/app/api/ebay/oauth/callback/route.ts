@@ -19,17 +19,39 @@ export async function GET(request: Request) {
   }
 
   const masterConfig = getMasterConfig();
+  let stateEnv = '';
+  try {
+    const rawState = searchParams.get('state');
+    if (rawState) {
+      const parsed = JSON.parse(rawState);
+      stateEnv = parsed.env || '';
+    }
+  } catch {}
+
   const isSandbox = Boolean(
-    masterConfig.masterAppId?.includes('-SBX-') ||
-    masterConfig.environment === 'sandbox'
+    stateEnv === 'sandbox' ||
+    (stateEnv !== 'production' && (masterConfig.environment === 'sandbox' || masterConfig.masterAppId?.includes('-SBX-')))
   );
+
+  const effectiveAppId = isSandbox
+    ? (masterConfig.sandboxAppId || masterConfig.masterAppId)
+    : (masterConfig.productionAppId || masterConfig.masterAppId);
+
+  const effectiveCertId = isSandbox
+    ? (masterConfig.sandboxCertId || masterConfig.masterCertId)
+    : (masterConfig.productionCertId || masterConfig.masterCertId);
+
+  const effectiveRuName = isSandbox
+    ? (masterConfig.sandboxRuName || masterConfig.masterRuName)
+    : (masterConfig.productionRuName || masterConfig.masterRuName);
+
   const tokenHost = isSandbox
     ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
     : 'https://api.ebay.com/identity/v1/oauth2/token';
 
   try {
     const credentials = Buffer.from(
-      `${masterConfig.masterAppId}:${masterConfig.masterCertId}`
+      `${effectiveAppId}:${effectiveCertId}`
     ).toString('base64');
 
     const tokenResponse = await fetch(tokenHost, {
@@ -41,7 +63,7 @@ export async function GET(request: Request) {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        redirect_uri: masterConfig.masterRuName,
+        redirect_uri: effectiveRuName,
       }),
     });
 

@@ -113,11 +113,19 @@ export default function Home() {
   const [newImageUrl, setNewImageUrl] = useState('');
   const [submittingListing, setSubmittingListing] = useState(false);
 
-  // Master Settings form state
+  // Master Settings dual-credential form state (Developer Sandbox + Production Live)
   const [masterAppId, setMasterAppId] = useState('');
   const [masterCertId, setMasterCertId] = useState('');
   const [masterRuName, setMasterRuName] = useState('');
-  const [masterEnv, setMasterEnv] = useState<'demo' | 'sandbox' | 'production'>('demo');
+  const [sandboxAppId, setSandboxAppId] = useState('');
+  const [sandboxCertId, setSandboxCertId] = useState('');
+  const [sandboxRuName, setSandboxRuName] = useState('');
+  const [productionAppId, setProductionAppId] = useState('');
+  const [productionCertId, setProductionCertId] = useState('');
+  const [productionRuName, setProductionRuName] = useState('');
+  const [credActiveTab, setCredActiveTab] = useState<'sandbox' | 'production'>('sandbox');
+  const [connectEnv, setConnectEnv] = useState<'sandbox' | 'production'>('sandbox');
+  const [masterEnv, setMasterEnv] = useState<'demo' | 'sandbox' | 'production'>('sandbox');
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
 
@@ -188,31 +196,56 @@ export default function Home() {
           if (cached) localCfg = JSON.parse(cached);
         } catch (e) {}
 
-        const finalAppId = cfgData.config.masterAppId || localCfg?.masterAppId || '';
-        const finalCertId = cfgData.config.masterCertId || localCfg?.masterCertId || '';
-        const finalRuName = cfgData.config.masterRuName || localCfg?.masterRuName || '';
         const finalEnv =
           cfgData.config.environment ||
           localCfg?.environment ||
-          (finalAppId.includes('-SBX-') ? 'sandbox' : 'sandbox');
+          (cfgData.config.masterAppId?.includes('-SBX-') ? 'sandbox' : 'sandbox');
+
+        // Sandbox keys
+        const sbxApp = cfgData.config.sandboxAppId || localCfg?.sandboxAppId || (cfgData.config.masterAppId?.includes('-SBX-') ? cfgData.config.masterAppId : '');
+        const sbxCert = cfgData.config.sandboxCertId || localCfg?.sandboxCertId || (cfgData.config.masterAppId?.includes('-SBX-') ? cfgData.config.masterCertId : '');
+        const sbxRu = cfgData.config.sandboxRuName || localCfg?.sandboxRuName || (cfgData.config.masterAppId?.includes('-SBX-') ? cfgData.config.masterRuName : '');
+
+        // Production keys
+        const prdApp = cfgData.config.productionAppId || localCfg?.productionAppId || (!cfgData.config.masterAppId?.includes('-SBX-') ? cfgData.config.masterAppId : '');
+        const prdCert = cfgData.config.productionCertId || localCfg?.productionCertId || (!cfgData.config.masterAppId?.includes('-SBX-') ? cfgData.config.masterCertId : '');
+        const prdRu = cfgData.config.productionRuName || localCfg?.productionRuName || (!cfgData.config.masterAppId?.includes('-SBX-') ? cfgData.config.masterRuName : '');
+
+        const activeApp = finalEnv === 'production' ? (prdApp || sbxApp) : (sbxApp || prdApp);
+        const activeCert = finalEnv === 'production' ? (prdCert || sbxCert) : (sbxCert || prdCert);
+        const activeRu = finalEnv === 'production' ? (prdRu || sbxRu) : (sbxRu || prdRu);
 
         const resolvedConfig = {
           ...cfgData.config,
-          masterAppId: finalAppId,
-          masterCertId: finalCertId,
-          masterRuName: finalRuName,
           environment: finalEnv,
-          isLiveConfigured: Boolean(finalAppId && finalRuName),
+          masterAppId: activeApp,
+          masterCertId: activeCert,
+          masterRuName: activeRu,
+          sandboxAppId: sbxApp,
+          sandboxCertId: sbxCert,
+          sandboxRuName: sbxRu,
+          productionAppId: prdApp,
+          productionCertId: prdCert,
+          productionRuName: prdRu,
+          isLiveConfigured: Boolean((sbxApp && sbxRu) || (prdApp && prdRu) || (activeApp && activeRu)),
         };
 
         setMasterConfig(resolvedConfig);
-        setMasterAppId(finalAppId);
-        setMasterCertId(finalCertId);
-        setMasterRuName(finalRuName);
+        setMasterAppId(activeApp);
+        setMasterCertId(activeCert);
+        setMasterRuName(activeRu);
+        setSandboxAppId(sbxApp);
+        setSandboxCertId(sbxCert);
+        setSandboxRuName(sbxRu);
+        setProductionAppId(prdApp);
+        setProductionCertId(prdCert);
+        setProductionRuName(prdRu);
         setMasterEnv(finalEnv);
+        setCredActiveTab(finalEnv === 'production' ? 'production' : 'sandbox');
+        setConnectEnv(finalEnv === 'production' ? 'production' : 'sandbox');
 
         // Auto sync to backend if backend was empty but client had keys
-        if (!cfgData.config.masterAppId && finalAppId) {
+        if (!cfgData.config.masterAppId && activeApp) {
           fetch('/api/ebay/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -811,38 +844,52 @@ export default function Home() {
     }
   };
 
-  // Save Master Settings
+  // Save Master Settings (Dual-Credential: Developer Sandbox + Production Live)
   const handleSaveMasterSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingSettings(true);
     setSettingsSuccess(false);
 
+    // Compute active master credentials based on current selected environment
+    const activeApp = masterEnv === 'production' ? (productionAppId || masterAppId) : (sandboxAppId || masterAppId);
+    const activeCert = masterEnv === 'production' ? (productionCertId || masterCertId) : (sandboxCertId || masterCertId);
+    const activeRu = masterEnv === 'production' ? (productionRuName || masterRuName) : (sandboxRuName || masterRuName);
+
+    const payload = {
+      environment: masterEnv,
+      masterAppId: activeApp,
+      masterCertId: activeCert,
+      masterRuName: activeRu,
+      sandboxAppId,
+      sandboxCertId,
+      sandboxRuName,
+      productionAppId,
+      productionCertId,
+      productionRuName,
+    };
+
     try {
-      localStorage.setItem(
-        'ebay_master_config',
-        JSON.stringify({
-          masterAppId,
-          masterCertId,
-          masterRuName,
-          environment: masterEnv,
-        })
-      );
+      localStorage.setItem('ebay_master_config', JSON.stringify(payload));
     } catch (e) {}
 
     try {
       const res = await fetch('/api/ebay/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          masterAppId,
-          masterCertId,
-          masterRuName,
-          environment: masterEnv,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.success) {
         setMasterConfig(data.config);
+        setMasterAppId(data.config.masterAppId || activeApp);
+        setMasterCertId(data.config.masterCertId || activeCert);
+        setMasterRuName(data.config.masterRuName || activeRu);
+        setSandboxAppId(data.config.sandboxAppId || sandboxAppId);
+        setSandboxCertId(data.config.sandboxCertId || sandboxCertId);
+        setSandboxRuName(data.config.sandboxRuName || sandboxRuName);
+        setProductionAppId(data.config.productionAppId || productionAppId);
+        setProductionCertId(data.config.productionCertId || productionCertId);
+        setProductionRuName(data.config.productionRuName || productionRuName);
         setSettingsSuccess(true);
         setTimeout(() => setSettingsSuccess(false), 3000);
       }
@@ -2189,96 +2236,258 @@ export default function Home() {
             </div>
           )}
 
-          {/* TAB 6: MASTER DEVELOPER SETUP */}
+          {/* TAB 6: MASTER DEVELOPER SETUP (DUAL CREDENTIAL: DEVELOPER SANDBOX + PRODUCTION LIVE) */}
           {activeTab === 'settings' && (
-            <div className="max-w-2xl bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Master SaaS Platform Credentials</h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Ye credentials sirf <strong>AAPKO</strong> (Platform Owner ko) ek baar{' '}
-                  <a
-                    href="https://developer.ebay.com"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 underline font-medium"
-                  >
-                    developer.ebay.com
-                  </a>{' '}
-                  se lekar daalni hoti hain. Aapke kisi bhi customer ya seller ko API keys touch karne ki zaroorat nahi padegi!
-                </p>
+            <div className="max-w-3xl bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
+              <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+                    <Key className="w-5 h-5 text-blue-600" />
+                    <span>Master SaaS Platform API Credentials</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                    Yahan aap <strong>Developer Sandbox (Testing)</strong> aur <strong>Production (Real Live)</strong> dono ke credentials alag-alag save karke rakh sakte hain. Jab testing karni ho toh Developer chunein, aur real eBay par live bechna ho toh Production!
+                  </p>
+                </div>
               </div>
 
               {settingsSuccess && (
-                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-lg text-xs flex items-center space-x-2">
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-lg text-xs flex items-center space-x-2 animate-fadeIn">
                   <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Master platform keys updated! Multi-tenant OAuth ready.</span>
+                  <span>Master platform keys updated! Dono Developer & Production credentials safely saved.</span>
                 </div>
               )}
 
-              <form onSubmit={handleSaveMasterSettings} className="space-y-4 text-xs">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Environment Mode
-                  </label>
-                  <select
-                    value={masterEnv}
-                    onChange={(e) => setMasterEnv(e.target.value as any)}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="demo">Demo Mode (Built-in OAuth Simulator for instant multi-store testing)</option>
-                    <option value="sandbox">eBay Developer Sandbox (Testing Environment)</option>
-                    <option value="production">eBay Live Production (Real Marketplace)</option>
-                  </select>
+              <form onSubmit={handleSaveMasterSettings} className="space-y-6 text-xs">
+                {/* Active Environment Mode Selector */}
+                <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-slate-50 border border-blue-200/80 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Globe className="w-4 h-4 text-blue-600" />
+                      <span>Active System Mode</span>
+                    </span>
+                    <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                      masterEnv === 'production'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : masterEnv === 'sandbox'
+                        ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : 'bg-purple-100 text-purple-800 border-purple-300'
+                    }`}>
+                      {masterEnv === 'production' ? '🚀 Production Live Mode Active' : masterEnv === 'sandbox' ? '🧪 Developer Sandbox (Testing) Active' : '⚡ Demo Simulator Mode Active'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* Sandbox Option */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMasterEnv('sandbox');
+                        setCredActiveTab('sandbox');
+                      }}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        masterEnv === 'sandbox'
+                          ? 'bg-white border-amber-500 shadow-sm ring-2 ring-amber-500/20'
+                          : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-xs text-slate-900">🧪 Developer Sandbox</span>
+                        {masterEnv === 'sandbox' && <CheckCircle className="w-4 h-4 text-amber-600" />}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Testing aur trial upload ke liye safe environment.</p>
+                    </button>
+
+                    {/* Production Option */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMasterEnv('production');
+                        setCredActiveTab('production');
+                      }}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        masterEnv === 'production'
+                          ? 'bg-white border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
+                          : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-xs text-slate-900">🚀 Production Live</span>
+                        {masterEnv === 'production' && <CheckCircle className="w-4 h-4 text-emerald-600" />}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Asli eBay marketplace aur live buyers ke liye.</p>
+                    </button>
+
+                    {/* Demo Option */}
+                    <button
+                      type="button"
+                      onClick={() => setMasterEnv('demo')}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        masterEnv === 'demo'
+                          ? 'bg-white border-purple-500 shadow-sm ring-2 ring-purple-500/20'
+                          : 'bg-white/80 border-slate-200 hover:bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-xs text-slate-900">⚡ Demo Simulator</span>
+                        {masterEnv === 'demo' && <CheckCircle className="w-4 h-4 text-purple-600" />}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Bina kisi eBay keys ke offline simulated testing.</p>
+                    </button>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Master App ID (Client ID)
-                  </label>
-                  <input
-                    type="text"
-                    value={masterAppId}
-                    onChange={(e) => setMasterAppId(e.target.value)}
-                    placeholder="e.g. YourCompanyName-MyApp-PRD-10928374..."
-                    className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                {/* Dual Credentials Tab Bar */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
+                  <div className="flex border-b border-slate-200 bg-white px-2 pt-2 space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => setCredActiveTab('sandbox')}
+                      className={`px-4 py-2.5 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer ${
+                        credActiveTab === 'sandbox'
+                          ? 'border-amber-500 text-amber-700 bg-amber-50/30'
+                          : 'border-transparent text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      <span>🧪 1. Developer Sandbox Credentials</span>
+                      {sandboxAppId ? (
+                        <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-bold">Configured</span>
+                      ) : (
+                        <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-full">Not set</span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCredActiveTab('production')}
+                      className={`px-4 py-2.5 text-xs font-bold transition flex items-center space-x-2 border-b-2 cursor-pointer ${
+                        credActiveTab === 'production'
+                          ? 'border-emerald-600 text-emerald-700 bg-emerald-50/30'
+                          : 'border-transparent text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      <span>🚀 2. Production Live Credentials</span>
+                      {productionAppId ? (
+                        <span className="bg-emerald-100 text-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-bold">Configured</span>
+                      ) : (
+                        <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded-full">Not set</span>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="p-5 space-y-4 bg-white">
+                    {/* TAB CONTENT: SANDBOX CREDENTIALS */}
+                    {credActiveTab === 'sandbox' && (
+                      <div className="space-y-4">
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] leading-relaxed">
+                          <strong>Developer Sandbox Keys:</strong> Ye keys <a href="https://developer.ebay.com" target="_blank" rel="noreferrer" className="underline font-bold">developer.ebay.com</a> ke <em>"Sandbox Keys"</em> tab se milti hain (App ID me <code>-SBX-</code> hota hai). Isse sandbox test sellers connect hote hain.
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Developer Sandbox App ID (Client ID)
+                          </label>
+                          <input
+                            type="text"
+                            value={sandboxAppId}
+                            onChange={(e) => setSandboxAppId(e.target.value)}
+                            placeholder="e.g. YourCompany-App-SBX-xxxxxxxx-xxxxxxxx"
+                            className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Developer Sandbox Cert ID (Client Secret)
+                          </label>
+                          <input
+                            type="password"
+                            value={sandboxCertId}
+                            onChange={(e) => setSandboxCertId(e.target.value)}
+                            placeholder="e.g. SBX-xxxxxxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                            className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Developer Sandbox RuName (Redirect URL Name)
+                          </label>
+                          <input
+                            type="text"
+                            value={sandboxRuName}
+                            onChange={(e) => setSandboxRuName(e.target.value)}
+                            placeholder="e.g. YourCompany-YourApp-SBX-xxxxxx"
+                            className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* TAB CONTENT: PRODUCTION CREDENTIALS */}
+                    {credActiveTab === 'production' && (
+                      <div className="space-y-4">
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-[11px] leading-relaxed">
+                          <strong>Production Live Keys:</strong> Ye keys <a href="https://developer.ebay.com" target="_blank" rel="noreferrer" className="underline font-bold">developer.ebay.com</a> ke <em>"Production Keys"</em> tab se milti hain (App ID me <code>-PRD-</code> hota hai). Isse real live eBay sellers connect hote hain.
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Production Live App ID (Client ID)
+                          </label>
+                          <input
+                            type="text"
+                            value={productionAppId}
+                            onChange={(e) => setProductionAppId(e.target.value)}
+                            placeholder="e.g. YourName-YourApp-PRD-10928374..."
+                            className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Production Live Cert ID (Client Secret)
+                          </label>
+                          <input
+                            type="password"
+                            value={productionCertId}
+                            onChange={(e) => setProductionCertId(e.target.value)}
+                            placeholder="PRD-client-secret-key"
+                            className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">
+                            Production Live RuName (Redirect URL Name)
+                          </label>
+                          <input
+                            type="text"
+                            value={productionRuName}
+                            onChange={(e) => setProductionRuName(e.target.value)}
+                            placeholder="e.g. YourName-YourApp-PRD-ru-name"
+                            className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Master Cert ID (Client Secret)
-                  </label>
-                  <input
-                    type="password"
-                    value={masterCertId}
-                    onChange={(e) => setMasterCertId(e.target.value)}
-                    placeholder="Your eBay Client Secret"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Master RuName (Redirect URL Name)
-                  </label>
-                  <input
-                    type="text"
-                    value={masterRuName}
-                    onChange={(e) => setMasterRuName(e.target.value)}
-                    placeholder="e.g. YourName-YourApp-PRD-4819"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div className="pt-2">
+                {/* Save Button */}
+                <div className="pt-2 flex items-center justify-between">
                   <button
                     type="submit"
                     disabled={savingSettings}
-                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg font-semibold flex items-center space-x-2 transition cursor-pointer"
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-lg font-semibold flex items-center space-x-2 transition cursor-pointer shadow-sm text-xs"
                   >
                     <CheckCircle className="w-4 h-4" />
-                    <span>{savingSettings ? 'Saving...' : 'Save Master Platform Keys'}</span>
+                    <span>{savingSettings ? 'Saving...' : 'Save Master Platform Keys (Both Saved)'}</span>
                   </button>
+
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Active key used: {masterEnv === 'production' ? (productionAppId ? '🚀 Production' : '⚠️ Production not set') : (sandboxAppId ? '🧪 Sandbox' : '⚠️ Sandbox not set')}
+                  </span>
                 </div>
               </form>
             </div>
@@ -2326,128 +2535,213 @@ export default function Home() {
               </button>
             </div>
 
+            {/* Environment Toggle for Connection */}
+            <div className="mb-4">
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                Target eBay Environment:
+              </label>
+              <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setConnectEnv('sandbox')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${
+                    connectEnv === 'sandbox'
+                      ? 'bg-amber-500 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  <span>🧪</span>
+                  <span>Developer Sandbox</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConnectEnv('production')}
+                  className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 cursor-pointer ${
+                    connectEnv === 'production'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  <span>🚀</span>
+                  <span>Production Live</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Marketplace Region Selector */}
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Marketplace Region
+              </label>
+              <select
+                value={connectMarketplace}
+                onChange={(e) => setConnectMarketplace(e.target.value as any)}
+                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="EBAY_US">eBay United States (USD $)</option>
+                <option value="EBAY_GB">eBay United Kingdom (GBP £)</option>
+                <option value="EBAY_DE">eBay Germany (EUR €)</option>
+                <option value="EBAY_AU">eBay Australia (AUD $)</option>
+                <option value="EBAY_IN">eBay India (INR ₹ / USD)</option>
+              </select>
+            </div>
+
             {/* Official eBay Flow Explanation */}
-            <div className="mb-4 bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
+            <div className="mb-4 bg-slate-50 border border-slate-200 p-3.5 rounded-xl space-y-1.5">
               <div className="flex items-center space-x-2 text-xs font-bold text-slate-800">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>1-Click eBay Authorization (No Manual Tokens!)</span>
+                <span>1-Click eBay Authorization (OAuth 2.0)</span>
               </div>
               <p className="text-[11px] text-slate-600 leading-relaxed">
-                Jaise hi aap <strong>"Sign in to eBay & Allow Access"</strong> par click karenge, eBay ka official login page khulega jahan seller ko sirf <strong>"I Agree / Allow"</strong> dabana hota hai. Tokens background me automatically exchange ho jaate hain.
+                Jaise hi aap <strong>"Sign in to eBay & Allow Access"</strong> par click karenge, eBay ka official {connectEnv === 'sandbox' ? 'Sandbox' : 'Production'} login page khulega jahan seller ko sirf <strong>"I Agree / Allow"</strong> dabana hota hai.
               </p>
             </div>
 
             {/* Live eBay Redirect vs Simulator */}
-            {masterConfig?.masterAppId && masterConfig?.masterRuName ? (
-              <div className="space-y-4">
-                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center space-x-2">
-                  <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                  <span>Master eBay Developer Keys Active! Click below to open real eBay Consent.</span>
-                </div>
+            {(() => {
+              const hasEnvKeys = connectEnv === 'sandbox'
+                ? Boolean(sandboxAppId?.trim() || masterConfig?.sandboxAppId?.trim() || (masterConfig?.masterAppId && masterConfig.masterAppId.includes('-SBX-')))
+                : Boolean(productionAppId?.trim() || masterConfig?.productionAppId?.trim() || (masterConfig?.masterAppId && !masterConfig.masterAppId.includes('-SBX-')));
 
-                <a
-                  href={`/api/ebay/oauth/login?marketplace=${connectMarketplace}&env=${masterConfig?.masterAppId?.includes('-SBX-') ? 'sandbox' : (masterConfig?.environment || 'sandbox')}`}
-                  className="w-full bg-[#0064D2] hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-md transition"
-                >
-                  <Globe className="w-4 h-4" />
-                  <span>
-                    Sign in to Official eBay & Allow Access ({masterConfig?.masterAppId?.includes('-SBX-') ? 'Sandbox Testing' : 'Production Live'})
-                  </span>
-                </a>
-              </div>
-            ) : (
-              <form onSubmit={handleConnectAccount} className="space-y-4 text-xs">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    eBay Seller Username *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={connectUsername}
-                    onChange={(e) => setConnectUsername(e.target.value)}
-                    placeholder="e.g. MyStore_Official"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              if (hasEnvKeys) {
+                return (
+                  <div className="space-y-4">
+                    <div className={`p-3 text-xs rounded-xl flex items-center space-x-2 ${
+                      connectEnv === 'sandbox'
+                        ? 'bg-amber-50 border border-amber-200 text-amber-900'
+                        : 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                    }`}>
+                      <Check className="w-4 h-4 flex-shrink-0" />
+                      <span>
+                        {connectEnv === 'sandbox' ? 'Developer Sandbox Keys Active (auth.sandbox.ebay.com)' : 'Production Live Keys Active (auth.ebay.com)'}
+                      </span>
+                    </div>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Store Display Name
-                  </label>
-                  <input
-                    type="text"
-                    value={connectStoreName}
-                    onChange={(e) => setConnectStoreName(e.target.value)}
-                    placeholder="e.g. MyStore Global Outlet"
-                    className="w-full border border-slate-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                    <a
+                      href={`/api/ebay/oauth/login?marketplace=${connectMarketplace}&env=${connectEnv}`}
+                      className={`w-full text-white py-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-md transition ${
+                        connectEnv === 'sandbox'
+                          ? 'bg-amber-600 hover:bg-amber-700'
+                          : 'bg-[#0064D2] hover:bg-blue-700'
+                      }`}
+                    >
+                      <Globe className="w-4 h-4" />
+                      <span>
+                        Sign in to Official eBay & Allow Access ({connectEnv === 'sandbox' ? 'Sandbox Testing' : 'Production Real Store'})
+                      </span>
+                    </a>
 
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Marketplace Region
-                  </label>
-                  <select
-                    value={connectMarketplace}
-                    onChange={(e) => setConnectMarketplace(e.target.value as any)}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="EBAY_US">eBay United States (USD $)</option>
-                    <option value="EBAY_GB">eBay United Kingdom (GBP £)</option>
-                    <option value="EBAY_DE">eBay Germany (EUR €)</option>
-                    <option value="EBAY_AU">eBay Australia (AUD $)</option>
-                    <option value="EBAY_IN">eBay India (INR ₹ / USD)</option>
-                  </select>
-                </div>
-
-                {/* eBay Consent Simulation Box */}
-                <div className="bg-blue-50/60 border border-blue-200/80 p-3.5 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-blue-900 text-[11px]">
-                      eBay Consent Permission Request:
-                    </span>
-                    <span className="text-[10px] bg-blue-200/60 text-blue-800 px-1.5 py-0.5 rounded font-mono">
-                      OAuth 2.0
-                    </span>
+                    <div className="pt-2 flex justify-between items-center border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowConnectModal(false);
+                          setActiveTab('settings');
+                        }}
+                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                      >
+                        Manage Master API Keys &rarr;
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowConnectModal(false)}
+                        className="px-4 py-1.5 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-blue-800">
-                    "Allow <strong>eBay Manager WebApp</strong> to access your inventory, manage active listings, fulfill buyer orders, and respond to member messages?"
-                  </p>
-                </div>
+                );
+              }
 
-                <div className="pt-2 flex justify-between items-center border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowConnectModal(false);
-                      setActiveTab('settings');
-                    }}
-                    className="text-[11px] text-blue-600 hover:underline font-semibold"
-                  >
-                    Add Live Master API Keys &rarr;
-                  </button>
-
-                  <div className="flex space-x-2">
+              return (
+                <div className="space-y-4">
+                  <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl">
+                    <p className="font-bold">
+                      {connectEnv === 'sandbox' ? 'Developer Sandbox Keys Missing' : 'Production Live Keys Missing'}
+                    </p>
+                    <p className="text-[11px] mt-1 text-rose-700">
+                      Aapne abhi is environment ki API credentials save nahi ki hain. Master API Setup me jaakar keys enter karein, ya fir neeche Developer Simulator use karein.
+                    </p>
                     <button
                       type="button"
-                      onClick={() => setShowConnectModal(false)}
-                      className="px-4 py-2 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                      onClick={() => {
+                        setShowConnectModal(false);
+                        setActiveTab('settings');
+                        setCredActiveTab(connectEnv);
+                      }}
+                      className="mt-2 text-xs font-bold text-rose-900 bg-rose-100 hover:bg-rose-200 px-3 py-1.5 rounded-lg transition"
                     >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={connectingAccount || !connectUsername.trim()}
-                      className="bg-[#0064D2] hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold flex items-center space-x-2 transition shadow-sm cursor-pointer"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      <span>{connectingAccount ? 'Connecting...' : 'I Agree & Allow on eBay'}</span>
+                      Configure {connectEnv === 'sandbox' ? 'Sandbox' : 'Production'} Keys Now &rarr;
                     </button>
                   </div>
+
+                  {/* Simulator Form */}
+                  <form onSubmit={handleConnectAccount} className="space-y-3.5 text-xs pt-2 border-t border-slate-200">
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      Or Connect via Local Test Simulator
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        eBay Seller Username *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={connectUsername}
+                        onChange={(e) => setConnectUsername(e.target.value)}
+                        placeholder="e.g. MyStore_Official"
+                        className="w-full border border-slate-300 rounded-lg p-2.5 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-semibold text-slate-700 mb-1">
+                        Store Display Name
+                      </label>
+                      <input
+                        type="text"
+                        value={connectStoreName}
+                        onChange={(e) => setConnectStoreName(e.target.value)}
+                        placeholder="e.g. MyStore Global Outlet"
+                        className="w-full border border-slate-300 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div className="pt-2 flex justify-between items-center border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowConnectModal(false);
+                          setActiveTab('settings');
+                        }}
+                        className="text-[11px] text-blue-600 hover:underline font-semibold"
+                      >
+                        Add Live Master API Keys &rarr;
+                      </button>
+
+                      <div className="flex space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowConnectModal(false)}
+                          className="px-4 py-2 border border-slate-300 rounded-lg font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={connectingAccount || !connectUsername.trim()}
+                          className="bg-[#0064D2] hover:bg-blue-700 disabled:opacity-50 text-white px-5 py-2 rounded-lg font-bold flex items-center space-x-2 transition shadow-sm cursor-pointer"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          <span>{connectingAccount ? 'Connecting...' : 'Connect Simulated Store'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </form>
                 </div>
-              </form>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}

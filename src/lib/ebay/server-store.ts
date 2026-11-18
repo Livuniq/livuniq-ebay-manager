@@ -167,10 +167,61 @@ export function getMasterConfig(): MasterAppConfig {
 
 export function updateMasterConfig(updates: Partial<MasterAppConfig>): MasterAppConfig {
   const store = getStore();
+  const prev = store.masterConfig || {};
+  const env = updates.environment || prev.environment || 'sandbox';
+
+  // Extract or preserve Sandbox keys
+  let sandboxAppId = updates.sandboxAppId !== undefined ? updates.sandboxAppId : prev.sandboxAppId;
+  let sandboxCertId = updates.sandboxCertId !== undefined ? updates.sandboxCertId : prev.sandboxCertId;
+  let sandboxRuName = updates.sandboxRuName !== undefined ? updates.sandboxRuName : prev.sandboxRuName;
+
+  // Extract or preserve Production keys
+  let productionAppId = updates.productionAppId !== undefined ? updates.productionAppId : prev.productionAppId;
+  let productionCertId = updates.productionCertId !== undefined ? updates.productionCertId : prev.productionCertId;
+  let productionRuName = updates.productionRuName !== undefined ? updates.productionRuName : prev.productionRuName;
+
+  // If updates passed masterAppId directly, assign to the appropriate environment
+  if (updates.masterAppId) {
+    if (updates.masterAppId.includes('-SBX-')) {
+      if (!sandboxAppId) sandboxAppId = updates.masterAppId;
+      if (!sandboxCertId && updates.masterCertId) sandboxCertId = updates.masterCertId;
+      if (!sandboxRuName && updates.masterRuName) sandboxRuName = updates.masterRuName;
+    } else {
+      if (!productionAppId) productionAppId = updates.masterAppId;
+      if (!productionCertId && updates.masterCertId) productionCertId = updates.masterCertId;
+      if (!productionRuName && updates.masterRuName) productionRuName = updates.masterRuName;
+    }
+  }
+
+  // Active keys resolved based on selected environment
+  let activeAppId = updates.masterAppId;
+  let activeCertId = updates.masterCertId;
+  let activeRuName = updates.masterRuName;
+
+  if (env === 'production') {
+    activeAppId = productionAppId || updates.masterAppId || '';
+    activeCertId = productionCertId || updates.masterCertId || '';
+    activeRuName = productionRuName || updates.masterRuName || '';
+  } else if (env === 'sandbox') {
+    activeAppId = sandboxAppId || updates.masterAppId || '';
+    activeCertId = sandboxCertId || updates.masterCertId || '';
+    activeRuName = sandboxRuName || updates.masterRuName || '';
+  }
+
   store.masterConfig = {
-    ...store.masterConfig,
+    ...prev,
     ...updates,
-    isLiveConfigured: Boolean(updates.masterAppId || store.masterConfig.masterAppId),
+    environment: env,
+    sandboxAppId: sandboxAppId || '',
+    sandboxCertId: sandboxCertId || '',
+    sandboxRuName: sandboxRuName || '',
+    productionAppId: productionAppId || '',
+    productionCertId: productionCertId || '',
+    productionRuName: productionRuName || '',
+    masterAppId: activeAppId || '',
+    masterCertId: activeCertId || '',
+    masterRuName: activeRuName || '',
+    isLiveConfigured: Boolean((activeAppId && activeRuName) || (sandboxAppId && sandboxRuName) || (productionAppId && productionRuName)),
   };
   saveStore(store);
   return store.masterConfig;

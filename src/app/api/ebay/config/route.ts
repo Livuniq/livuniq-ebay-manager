@@ -5,13 +5,22 @@ export async function GET() {
   await ensureStoreAsync();
   const masterConfig = getMasterConfig();
   if (!masterConfig.masterAppId && process.env.EBAY_MASTER_APP_ID) {
-    masterConfig.masterAppId = process.env.EBAY_MASTER_APP_ID;
+    const envAppId = process.env.EBAY_MASTER_APP_ID;
+    const isSbx = envAppId.includes('-SBX-');
+    masterConfig.masterAppId = envAppId;
     masterConfig.masterCertId = process.env.EBAY_MASTER_CERT_ID || '';
     masterConfig.masterRuName = process.env.EBAY_MASTER_RU_NAME || '';
     masterConfig.isLiveConfigured = true;
-    masterConfig.environment = process.env.EBAY_MASTER_APP_ID.includes('-SBX-')
-      ? 'sandbox'
-      : masterConfig.environment || 'sandbox';
+    masterConfig.environment = isSbx ? 'sandbox' : masterConfig.environment || 'sandbox';
+    if (isSbx && !masterConfig.sandboxAppId) {
+      masterConfig.sandboxAppId = envAppId;
+      masterConfig.sandboxCertId = process.env.EBAY_MASTER_CERT_ID || '';
+      masterConfig.sandboxRuName = process.env.EBAY_MASTER_RU_NAME || '';
+    } else if (!isSbx && !masterConfig.productionAppId) {
+      masterConfig.productionAppId = envAppId;
+      masterConfig.productionCertId = process.env.EBAY_MASTER_CERT_ID || '';
+      masterConfig.productionRuName = process.env.EBAY_MASTER_RU_NAME || '';
+    }
   }
   return NextResponse.json({
     success: true,
@@ -24,10 +33,16 @@ export async function POST(request: Request) {
     await ensureStoreAsync();
     const body = await request.json();
     const updated = updateMasterConfig({
+      environment: body.environment || 'sandbox',
       masterAppId: body.masterAppId,
       masterCertId: body.masterCertId,
       masterRuName: body.masterRuName,
-      environment: body.environment || 'demo',
+      sandboxAppId: body.sandboxAppId,
+      sandboxCertId: body.sandboxCertId,
+      sandboxRuName: body.sandboxRuName,
+      productionAppId: body.productionAppId,
+      productionCertId: body.productionCertId,
+      productionRuName: body.productionRuName,
     });
     return NextResponse.json({ success: true, config: updated });
   } catch (error) {

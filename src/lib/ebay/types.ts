@@ -121,4 +121,10 @@ export interface MasterAppConfig {
   masterRuName: string;
   environment: 'sandbox' | 'production' | 'demo';
   isLiveConfigured: boolean;
+  sandboxAppId?: string;
+  sandboxCertId?: string;
+  sandboxRuName?: string;
+  productionAppId?: string;
+  productionCertId?: string;
+  productionRuName?: string;
 }

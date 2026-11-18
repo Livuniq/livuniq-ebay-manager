@@ -27,7 +27,15 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
   const store = getStore();
   const masterConfig = store.masterConfig;
 
-  if (!account.refreshToken || !masterConfig.masterAppId || !masterConfig.masterCertId) {
+  const isSandbox = isSandboxEnv(masterConfig);
+  const effectiveAppId = isSandbox
+    ? (masterConfig.sandboxAppId || masterConfig.masterAppId)
+    : (masterConfig.productionAppId || masterConfig.masterAppId);
+  const effectiveCertId = isSandbox
+    ? (masterConfig.sandboxCertId || masterConfig.masterCertId)
+    : (masterConfig.productionCertId || masterConfig.masterCertId);
+
+  if (!account.refreshToken || !effectiveAppId || !effectiveCertId) {
     return account.accessToken;
   }
 
@@ -36,14 +44,13 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
     return account.accessToken;
   }
 
-  const tokenHost =
-    isSandboxEnv(masterConfig)
-      ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
-      : 'https://api.ebay.com/identity/v1/oauth2/token';
+  const tokenHost = isSandbox
+    ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
+    : 'https://api.ebay.com/identity/v1/oauth2/token';
 
   try {
     const credentials = Buffer.from(
-      `${masterConfig.masterAppId}:${masterConfig.masterCertId}`
+      `${effectiveAppId}:${effectiveCertId}`
     ).toString('base64');
 
     const res = await fetch(tokenHost, {
