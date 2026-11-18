@@ -325,7 +325,7 @@ export function getListings(accountId?: string): EbayListing[] {
         /^\d+$/.test(l.ebayListingId.trim()) &&
         l.status === 'DRAFT'
       ) {
-        l.status = (l.quantity || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
+        l.status = (l.quantity !== undefined && l.quantity !== null ? l.quantity : 0) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
       }
       return l;
     });

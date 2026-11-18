@@ -58,11 +58,13 @@ export async function POST(request: Request) {
       }
     }
 
+    const targetQty = !isNaN(parseInt(data.quantity)) ? parseInt(data.quantity) : 1;
+
     if (shouldPublishToEbay && account && account.accessToken) {
       const addResult = await addLiveEbayListing(account, {
         title: data.title,
         price: parseFloat(data.price),
-        quantity: parseInt(data.quantity) || 1,
+        quantity: targetQty,
         sku: data.sku,
         description: data.description,
         categoryId: data.categoryId || '261975',
@@ -104,7 +106,7 @@ export async function POST(request: Request) {
       title: data.title,
       price: parseFloat(data.price),
       currency: data.currency || account?.currency || 'USD',
-      quantity: parseInt(data.quantity) || 1,
+      quantity: targetQty,
       category: data.category || '/Jewelry & Watches/Engagement & Wedding/Engagement Rings',
       condition: (data.conditionId === '1000' || data.conditionId === '1500' || data.conditionId === '1750') ? 'NEW' : 'USED',
       conditionId: data.conditionId || '1000',
@@ -126,7 +128,7 @@ export async function POST(request: Request) {
       locationCountry: data.locationCountry || account?.locationCountry || 'US',
       locationPostalCode: data.locationPostalCode || account?.locationPostalCode || '',
       locationCityState: data.locationCityState || account?.locationCityState || '',
-      status: shouldPublishToEbay ? ((parseInt(data.quantity) || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK') : 'DRAFT',
+      status: shouldPublishToEbay ? (targetQty > 0 ? 'ACTIVE' : 'OUT_OF_STOCK') : 'DRAFT',
       ebayListingId: liveItemId,
       hasUnpublishedChanges: !shouldPublishToEbay || ebayLiveStatus !== 'LIVE_CREATED',
       lastSyncedWithEbayAt: ebayLiveStatus === 'LIVE_CREATED' ? new Date().toISOString() : undefined,
@@ -368,7 +370,7 @@ export async function PATCH(request: Request) {
           const finalId = newEbayId || currentListing.ebayListingId;
           currentListing = updateListing(id, {
             ebayListingId: finalId,
-            status: (currentListing.quantity || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK',
+            status: (currentListing.quantity !== undefined && currentListing.quantity !== null ? currentListing.quantity : 0) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK',
             hasUnpublishedChanges: false,
             lastSyncedWithEbayAt: new Date().toISOString(),
           }) || currentListing;

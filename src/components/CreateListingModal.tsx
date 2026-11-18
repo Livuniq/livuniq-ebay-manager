@@ -322,8 +322,8 @@ export default function CreateListingModal({
         body: JSON.stringify({
           accountId: activeAccount?.id,
           title: title.trim(),
-          price: parseFloat(price),
-          quantity: parseInt(quantity) || 1,
+          price: parseFloat(price) || 0,
+          quantity: isNaN(parseInt(quantity)) ? 1 : parseInt(quantity),
           sku: sku.trim(),
           categoryId,
           category,

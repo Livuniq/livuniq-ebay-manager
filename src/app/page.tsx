@@ -703,7 +703,7 @@ export default function Home() {
     setShowEditListingModal(item);
     setEditTitle(item.title);
     setEditPrice(item.price.toString());
-    setEditQuantity(item.quantity.toString());
+    setEditQuantity((item.quantity !== undefined && item.quantity !== null ? item.quantity : 0).toString());
     setEditSku(item.sku);
     setEditImages(
       item.images && item.images.length > 0
@@ -743,8 +743,8 @@ export default function Home() {
         body: JSON.stringify({
           id: showEditListingModal.id,
           title: editTitle,
-          price: parseFloat(editPrice),
-          quantity: parseInt(editQuantity) || 0,
+          price: parseFloat(editPrice) || 0,
+          quantity: isNaN(parseInt(editQuantity)) ? 0 : parseInt(editQuantity),
           sku: editSku,
           description: editDescription,
           images: editImages,
@@ -1722,8 +1722,9 @@ export default function Home() {
                             <td className="py-3 px-4">
                               <div className="flex items-center space-x-2">
                                 <input
+                                  key={`${item.id}-${item.quantity}`}
                                   type="number"
-                                  defaultValue={item.quantity}
+                                  defaultValue={item.quantity !== undefined && item.quantity !== null ? item.quantity : 0}
                                   min="0"
                                   onBlur={(e) => {
                                     const val = parseInt(e.target.value);

@@ -142,8 +142,8 @@ export default function EditListingModal({
   useEffect(() => {
     if (listing) {
       setTitle(listing.title || '');
-      setPrice(listing.price ? listing.price.toString() : '');
-      setQuantity(listing.quantity ? listing.quantity.toString() : '1');
+      setPrice(listing.price !== undefined && listing.price !== null ? listing.price.toString() : '');
+      setQuantity(listing.quantity !== undefined && listing.quantity !== null ? listing.quantity.toString() : '0');
       setSku(listing.sku || '');
       setSellerNotes(listing.sellerNotes || 'New with packaging, original box & tag included.');
       setCategory(listing.category || EBAY_JEWELRY_CATEGORIES[0].path);
@@ -415,8 +415,8 @@ export default function EditListingModal({
         body: JSON.stringify({
           id: listing.id,
           title: title.trim(),
-          price: parseFloat(price),
-          quantity: parseInt(quantity) || 0,
+          price: parseFloat(price) || 0,
+          quantity: isNaN(parseInt(quantity)) ? 0 : parseInt(quantity),
           sku: sku.trim(),
           images,
           videoUrl,

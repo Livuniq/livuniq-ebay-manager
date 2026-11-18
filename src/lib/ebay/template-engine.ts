@@ -391,7 +391,7 @@ export function renderDescriptionTemplate(templateHtml: string, data: ListingTem
   output = output.replace(/\{\{\s*title\s*\}\}/gi, data.title || '');
   output = output.replace(/\{\{\s*price\s*\}\}/gi, priceFormatted);
   output = output.replace(/\{\{\s*sku\s*\}\}/gi, data.sku || '');
-  output = output.replace(/\{\{\s*quantity\s*\}\}/gi, data.quantity ? data.quantity.toString() : '1');
+  output = output.replace(/\{\{\s*quantity\s*\}\}/gi, data.quantity !== undefined && data.quantity !== null ? data.quantity.toString() : '1');
   output = output.replace(/\{\{\s*condition\s*\}\}/gi, data.condition || 'New');
   output = output.replace(/\{\{\s*(condition_description|seller_notes)\s*\}\}/gi, data.conditionDescription || '');
   output = output.replace(/\{\{\s*category\s*\}\}/gi, data.category || 'Jewelry');
@@ -470,7 +470,7 @@ export function renderDescriptionTemplate(templateHtml: string, data: ListingTem
     title: data.title || '',
     price: priceFormatted,
     sku: data.sku || '',
-    quantity: data.quantity ? data.quantity.toString() : '1',
+    quantity: data.quantity !== undefined && data.quantity !== null ? data.quantity.toString() : '1',
     condition: data.condition || 'New',
     category: data.category || 'Jewelry',
     store_name: data.storeName || 'Livuniq Fine Jewelry',

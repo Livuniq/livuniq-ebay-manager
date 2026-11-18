@@ -232,10 +232,9 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       const startVal = parseFloat(itemBlock.match(/<StartPrice[^>]*>([^<]+)<\/StartPrice>/)?.[1] || '0');
       const binVal = parseFloat(itemBlock.match(/<BuyItNowPrice[^>]*>([^<]+)<\/BuyItNowPrice>/)?.[1] || '0');
       const parsedPrice = (curVal > 0 ? curVal : null) || (startVal > 0 ? startVal : null) || (binVal > 0 ? binVal : 0);
-      const quantityStr =
-        itemBlock.match(/<QuantityAvailable>([^<]+)<\/QuantityAvailable>/)?.[1] ||
-        itemBlock.match(/<Quantity>([^<]+)<\/Quantity>/)?.[1] ||
-        '1';
+      const qAvailMatch = itemBlock.match(/<QuantityAvailable>([^<]+)<\/QuantityAvailable>/)?.[1];
+      const qTotalMatch = itemBlock.match(/<Quantity>([^<]+)<\/Quantity>/)?.[1];
+      const quantityStr = qAvailMatch !== undefined ? qAvailMatch : (qTotalMatch !== undefined ? qTotalMatch : '1');
       const quantitySoldStr = itemBlock.match(/<QuantitySold>([^<]+)<\/QuantitySold>/)?.[1] || '0';
       const galleryUrl =
         itemBlock.match(/<GalleryURL>([^<]+)<\/GalleryURL>/)?.[1] ||
@@ -255,6 +254,9 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       }
       const uniquePictureUrls = deduplicateImageUrls(pictureUrls);
 
+      const parsedLiveQty = !isNaN(parseInt(quantityStr)) ? parseInt(quantityStr) : 0;
+      const parsedSoldQty = !isNaN(parseInt(quantitySoldStr)) ? parseInt(quantitySoldStr) : 0;
+
       if (itemId) {
         fetchedListings.push({
           id: `lst-${itemId}`,
@@ -263,13 +265,13 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
           title,
           price: parsedPrice,
           currency: account.currency || 'USD',
-          quantity: parseInt(quantityStr) || 1,
-          sold: parseInt(quantitySoldStr) || 0,
+          quantity: parsedLiveQty,
+          sold: parsedSoldQty,
           category,
           condition: 'NEW',
           imageUrl: uniquePictureUrls[0] || galleryUrl,
           images: uniquePictureUrls,
-          status: parseInt(quantityStr) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK',
+          status: parsedLiveQty > 0 ? 'ACTIVE' : 'OUT_OF_STOCK',
           ebayListingId: itemId,
           hasUnpublishedChanges: false,
           lastSyncedWithEbayAt: new Date().toISOString(),
@@ -332,10 +334,10 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       }
 
       // Quantity & Stock Status
-      const liveQty =
-        itemDetailXml.match(/<QuantityAvailable>([^<]+)<\/QuantityAvailable>/)?.[1] ||
-        itemDetailXml.match(/<Quantity>([^<]+)<\/Quantity>/)?.[1];
-      if (liveQty && !isNaN(parseInt(liveQty))) {
+      const qAvailDetail = itemDetailXml.match(/<QuantityAvailable>([^<]+)<\/QuantityAvailable>/)?.[1];
+      const qTotalDetail = itemDetailXml.match(/<Quantity>([^<]+)<\/Quantity>/)?.[1];
+      const liveQty = qAvailDetail !== undefined ? qAvailDetail : qTotalDetail;
+      if (liveQty !== undefined && liveQty !== null && !isNaN(parseInt(liveQty))) {
         item.quantity = parseInt(liveQty);
         item.status = item.quantity > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
       }

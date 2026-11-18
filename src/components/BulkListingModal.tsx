@@ -458,7 +458,8 @@ export default function BulkListingModal({
 
       // Quantity
       const rawQty = colMap.quantityCol ? row[colMap.quantityCol] : row['Quantity'];
-      const quantity = parseInt(String(rawQty || '1')) || 1;
+      const parsedBulkQty = parseInt(String(rawQty !== undefined && rawQty !== null && rawQty !== '' ? rawQty : '1'));
+      const quantity = !isNaN(parsedBulkQty) ? parsedBulkQty : 1;
 
       // Category mapping
       const rawCat = String(

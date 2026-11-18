@@ -33,7 +33,7 @@ export async function POST(request: Request) {
 
       // Auto-heal status if it has an eBay Item ID
       if (isLive && l.status === 'DRAFT') {
-        l.status = (l.quantity || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
+        l.status = (l.quantity !== undefined && l.quantity !== null ? l.quantity : 0) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
       }
 
       if (body.onlyDue) {
