@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getStore, saveStoreAsync, ensureStoreAsync, getActiveAccountId } from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
-import { isVideoMedia, updateDescriptionImages } from '@/lib/ebay/template-engine';
+import { isVideoMedia, updateDescriptionImages, deduplicateImageUrls } from '@/lib/ebay/template-engine';
 
 export async function POST(request: Request) {
   try {
@@ -82,10 +82,8 @@ export async function POST(request: Request) {
         ? 1
         : 0;
 
-      // Filter only valid image URLs (excluding videos)
-      const validNewImages = (update.images || [])
-        .map((img) => (typeof img === 'string' ? img.trim() : ''))
-        .filter((img) => Boolean(img) && !isVideoMedia(img));
+      // Filter and deduplicate only valid image URLs (strictly no videos and no duplicates)
+      const validNewImages = deduplicateImageUrls(update.images || []);
 
       if (validNewImages.length === 0) {
         results.push({

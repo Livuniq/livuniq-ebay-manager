@@ -20,7 +20,7 @@ import {
   Info,
 } from 'lucide-react';
 import { EbayListing, ConnectedAccount } from '@/lib/ebay/types';
-import { updateDescriptionImages } from '@/lib/ebay/template-engine';
+import { updateDescriptionImages, deduplicateImageUrls } from '@/lib/ebay/template-engine';
 
 interface BulkImageUpdateModalProps {
   isOpen: boolean;
@@ -42,10 +42,10 @@ interface SkuImageGroup {
   selected: boolean;
 }
 
-// Client-side image optimizer to keep uploads lightweight (max 1600px, JPEG 0.85)
-async function optimizeImageForUpload(file: File, maxDim = 1600, quality = 0.85): Promise<File> {
-  // If file is already small (e.g. <= 350KB), return as is
-  if (file.size <= 350 * 1024) return file;
+// Client-side image optimizer to keep uploads lightweight (max 1200px, JPEG 0.8) and prevent HTTP 413 Payload Too Large
+async function optimizeImageForUpload(file: File, maxDim = 1200, quality = 0.8): Promise<File> {
+  // If file is already small (e.g. <= 150KB), return as is
+  if (file.size <= 150 * 1024) return file;
 
   return new Promise((resolve) => {
     try {
@@ -169,7 +169,12 @@ export default function BulkImageUpdateModal({
             files: [],
           };
         }
-        rawGroups[groupKey].files.push({ file, relPath });
+        // Deduplicate within the group by filename
+        const fileBaseName = file.name.toLowerCase();
+        const alreadyHasFile = rawGroups[groupKey].files.some((f) => f.file.name.toLowerCase() === fileBaseName);
+        if (!alreadyHasFile) {
+          rawGroups[groupKey].files.push({ file, relPath });
+        }
       }
 
       const detectedKeys = Object.keys(rawGroups);
@@ -307,10 +312,12 @@ export default function BulkImageUpdateModal({
         const g = selectedGroups[i];
         setUpdatingProgress({ current: i + 1, total: selectedGroups.length, sku: g.sku });
 
+        const cleanNewUrls = deduplicateImageUrls(g.files.map((f) => f.url));
+
         const singleUpdate = {
           listingId: g.matchedListing!.id,
           sku: g.matchedListing!.sku,
-          images: g.files.map((f) => f.url),
+          images: cleanNewUrls,
         };
 
         const res = await fetch('/api/ebay/listings/bulk-update-images', {
@@ -334,12 +341,11 @@ export default function BulkImageUpdateModal({
         }
 
         const existing = g.matchedListing!;
-        const newUrls = g.files.map((f) => f.url);
         const updated: EbayListing = {
           ...existing,
-          images: newUrls,
-          imageUrl: newUrls[0] || existing.imageUrl,
-          description: updateDescriptionImages(existing.description, newUrls, existing.images),
+          images: cleanNewUrls,
+          imageUrl: cleanNewUrls[0] || existing.imageUrl,
+          description: updateDescriptionImages(existing.description, cleanNewUrls, existing.images),
           hasUnpublishedChanges: !pushLiveToEbay,
           lastUpdated: new Date().toISOString(),
         };

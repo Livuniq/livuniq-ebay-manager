@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getStore, getActiveAccountId, createListing, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
 import { addLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
-import { isVideoMedia } from '@/lib/ebay/template-engine';
+import { isVideoMedia, deduplicateImageUrls } from '@/lib/ebay/template-engine';
 import { EbayListing } from '@/lib/ebay/types';
 
 export interface BulkImportItemPayload {
@@ -64,8 +64,8 @@ export async function POST(request: Request) {
       let message = 'Saved as draft';
 
       const rawImages = Array.isArray(item.images) ? item.images : [];
-      // Filter out any videos so validImages strictly contains product photos
-      const validImages = rawImages.filter((u) => Boolean(u && u.trim()) && !isVideoMedia(u));
+      // Deduplicate images and filter out any videos so validImages strictly contains unique product photos
+      const validImages = deduplicateImageUrls(rawImages);
       const detectedVideo = item.videoUrl || rawImages.find((u) => isVideoMedia(u));
       const mainImageUrl = validImages[0] || 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=500&auto=format&fit=crop&q=60';
 

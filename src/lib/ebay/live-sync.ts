@@ -1,7 +1,7 @@
 import { getStore, saveStore, saveStoreAsync } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
-import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml } from './template-engine';
+import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml, deduplicateImageUrls } from './template-engine';
 import fs from 'fs';
 import path from 'path';
 
@@ -235,7 +235,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       const sku = itemBlock.match(/<SKU>([^<]+)<\/SKU>/)?.[1] || `EBAY-${itemId.slice(-6)}`;
       const category = itemBlock.match(/<CategoryName>([^<]+)<\/CategoryName>/)?.[1] || 'Jewelry & Watches';
 
-      // Parse all images inside PictureDetails if present
+      // Parse all images inside PictureDetails if present and deduplicate
       const pictureUrls: string[] = [];
       const picRegex = /<PictureURL>([^<]+)<\/PictureURL>/g;
       let picMatch;
@@ -245,6 +245,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
       if (pictureUrls.length === 0 && galleryUrl) {
         pictureUrls.push(galleryUrl);
       }
+      const uniquePictureUrls = deduplicateImageUrls(pictureUrls);
 
       if (itemId) {
         fetchedListings.push({
@@ -258,8 +259,8 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
           sold: parseInt(quantitySoldStr) || 0,
           category,
           condition: 'NEW',
-          imageUrl: pictureUrls[0] || galleryUrl,
-          images: pictureUrls,
+          imageUrl: uniquePictureUrls[0] || galleryUrl,
+          images: uniquePictureUrls,
           status: parseInt(quantityStr) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK',
           ebayListingId: itemId,
           hasUnpublishedChanges: false,
@@ -572,10 +573,11 @@ export async function reviseLiveEbayListing(
       }
     }
 
-    if (validImages.length > 0) {
+    const dedupedValidImages = deduplicateImageUrls(validImages);
+    if (dedupedValidImages.length > 0) {
       itemXmlFields += `<PictureDetails>
         <GalleryType>Gallery</GalleryType>
-        ${validImages.map((url) => `<PictureURL>${cleanXmlUrl(url)}</PictureURL>`).join('')}
+        ${dedupedValidImages.map((url) => `<PictureURL>${cleanXmlUrl(url)}</PictureURL>`).join('')}
       </PictureDetails>`;
     }
   }
@@ -788,7 +790,9 @@ export async function addLiveEbayListing(
     }
   }
 
-  const finalImages = validAddImages.length > 0 ? validAddImages : ['https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/dasAAOSwRdNmbcnI/$_57.JPG?set_id=880000500F'];
+  const finalImages = deduplicateImageUrls(
+    validAddImages.length > 0 ? validAddImages : ['https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/dasAAOSwRdNmbcnI/$_57.JPG?set_id=880000500F']
+  );
 
   const pictureDetailsXml = `<PictureDetails>
     <GalleryType>Gallery</GalleryType>

@@ -13,6 +13,7 @@ import {
 } from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing, addLiveEbayListing, endLiveEbayListing } from '@/lib/ebay/live-sync';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
+import { deduplicateImageUrls } from '@/lib/ebay/template-engine';
 
 export async function GET(request: Request) {
   await ensureStoreAsync();
@@ -88,7 +89,8 @@ export async function POST(request: Request) {
       }
     }
 
-    const images = Array.isArray(data.images) && data.images.length > 0 ? data.images : [];
+    const rawImages = Array.isArray(data.images) && data.images.length > 0 ? data.images : [];
+    const images = deduplicateImageUrls(rawImages);
     const mainImageUrl = images[0] || data.imageUrl || 'https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=500&auto=format&fit=crop&q=60';
 
     const created = createListing({
@@ -158,8 +160,11 @@ export async function PATCH(request: Request) {
       else if (updates.quantity > 0 && updates.status === 'OUT_OF_STOCK') updates.status = 'ACTIVE';
     }
 
-    if (updates.images && Array.isArray(updates.images) && updates.images.length > 0) {
-      updates.imageUrl = updates.images[0];
+    if (updates.images && Array.isArray(updates.images)) {
+      updates.images = deduplicateImageUrls(updates.images);
+      if (updates.images.length > 0) {
+        updates.imageUrl = updates.images[0];
+      }
     }
 
     if (updates.itemSpecifics) {

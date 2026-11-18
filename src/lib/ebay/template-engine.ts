@@ -61,11 +61,47 @@ export function generateSpecificsTableHtml(specifics: Record<string, string> = {
 </div>`;
 }
 
+// Deduplicate image URLs to prevent double uploads or duplicate thumbnails (strictly photos, NO videos)
+export function deduplicateImageUrls(urls: string[] = []): string[] {
+  if (!Array.isArray(urls)) return [];
+  const seenUrls = new Set<string>();
+  const seenLocalFiles = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of urls) {
+    if (!raw || typeof raw !== 'string') continue;
+    const url = raw.trim();
+    if (!url || isVideoMedia(url)) continue;
+
+    // 1. Direct exact URL deduplication
+    if (seenUrls.has(url)) continue;
+    seenUrls.add(url);
+
+    // 2. Local uploads deduplication: drop duplicate uploads of the same file even if timestamp prefix differs
+    const isLocalUpload = url.includes('/uploads/') || url.startsWith('data:image/');
+    if (isLocalUpload && !url.startsWith('data:image/')) {
+      const cleanUrl = url.split('?')[0];
+      const fileName = cleanUrl.split('/').pop() || '';
+      // Strip timestamp/UUID prefix like 1795010640001- or opt-
+      const strippedName = fileName.replace(/^(\d{10,14}|opt)[-_]/i, '').toLowerCase();
+
+      if (strippedName && seenLocalFiles.has(strippedName)) {
+        continue;
+      }
+      if (strippedName) {
+        seenLocalFiles.add(strippedName);
+      }
+    }
+
+    result.push(url);
+  }
+
+  return result;
+}
+
 // Generate styled HTML Gallery of product photos (strictly photos, NO videos)
 export function generateGalleryHtml(images: string[] = []): string {
-  const validImages = images
-    .filter((img) => Boolean(img && img.trim()))
-    .filter((img) => !isVideoMedia(img));
+  const validImages = deduplicateImageUrls(images);
   if (validImages.length === 0) return '';
 
   const items = validImages
@@ -83,9 +119,7 @@ export function generateGalleryHtml(images: string[] = []): string {
 
 // Generate dynamic pure-CSS radio gallery matching the exact user structure (#gallBlock) (strictly photos, NO videos)
 export function generateRadioGalleryHtml(images: string[] = []): string {
-  const validImages = images
-    .filter((img) => Boolean(img && img.trim()))
-    .filter((img) => !isVideoMedia(img));
+  const validImages = deduplicateImageUrls(images);
   if (validImages.length === 0) return '';
 
   const radios = validImages
@@ -334,8 +368,8 @@ export function renderDescriptionTemplate(templateHtml: string, data: ListingTem
   output = output.replace(/\{\{\s*store_name\s*\}\}/gi, data.storeName || 'Livuniq Fine Jewelry');
   output = output.replace(/\{\{\s*description\s*\}\}/gi, data.customDescription || '');
 
-  // 2. Images (Filter out any video files so videos never render as broken photos/thumbnails)
-  const photoOnlyImages = (data.images || []).filter((img) => Boolean(img && img.trim()) && !isVideoMedia(img));
+  // 2. Images (Filter out any video files so videos never render as broken photos/thumbnails, and deduplicate to prevent double uploads)
+  const photoOnlyImages = deduplicateImageUrls(data.images || []);
   const mainImg = photoOnlyImages[0] || '';
   output = output.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, mainImg);
 
@@ -596,9 +630,7 @@ export function updateDescriptionImages(
   if (!description || typeof description !== 'string') return '';
   let updated = description;
 
-  const validNew = newImages
-    .map((u) => (typeof u === 'string' ? u.trim() : ''))
-    .filter((u) => Boolean(u) && !isVideoMedia(u));
+  const validNew = deduplicateImageUrls(newImages);
 
   if (validNew.length === 0) return updated;
 
@@ -615,9 +647,7 @@ export function updateDescriptionImages(
   }
 
   // 2. Direct replacement of any known old images in the HTML description
-  const validOld = oldImages
-    .map((u) => (typeof u === 'string' ? u.trim() : ''))
-    .filter((u) => Boolean(u) && !isVideoMedia(u));
+  const validOld = deduplicateImageUrls(oldImages);
 
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];

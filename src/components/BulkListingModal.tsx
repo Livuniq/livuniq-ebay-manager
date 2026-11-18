@@ -32,7 +32,7 @@ import * as XLSX from 'xlsx';
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
 import BusinessPoliciesSelector from './BusinessPoliciesSelector';
 import { EBAY_JEWELRY_CATEGORIES } from '@/lib/ebay/constants';
-import { renderDescriptionTemplate, DEFAULT_TEMPLATES, isVideoMedia } from '@/lib/ebay/template-engine';
+import { renderDescriptionTemplate, DEFAULT_TEMPLATES, isVideoMedia, deduplicateImageUrls } from '@/lib/ebay/template-engine';
 import {
   DEFAULT_SPECIFICS_MAPPINGS,
   DEFAULT_CATEGORY_PROFILES,
@@ -1038,7 +1038,11 @@ export default function BulkListingModal({
         }
       }
 
-      const updatedImages = [...stagedImages, ...newImages];
+      // Deduplicate images when merging new upload with stagedImages:
+      // If the same file or relativePath is already staged, replace it with the fresh upload so photos never duplicate
+      const newRelativePaths = new Set(newImages.map((img) => (img.relativePath || img.filename).toLowerCase()));
+      const filteredOld = stagedImages.filter((img) => !newRelativePaths.has((img.relativePath || img.filename).toLowerCase()));
+      const updatedImages = [...filteredOld, ...newImages];
       const updatedVideos = [...stagedVideos, ...newVideos];
       setStagedImages(updatedImages);
       setStagedVideos(updatedVideos);
@@ -1071,8 +1075,22 @@ export default function BulkListingModal({
       const explicitNames = new Set(row.imageNames.map((n) => n.toLowerCase()));
 
       const matched: string[] = [];
+      const matchedFiles = new Set<string>();
       let matchedFolderName = '';
       let matchedVideoUrl = row.videoUrl || '';
+
+      // Helper to add unique images only
+      const addUniqueMatch = (imgUrl: string, fileName?: string) => {
+        if (!imgUrl) return;
+        const normUrl = imgUrl.trim();
+        const base = (fileName || normUrl.split('?')[0].split('/').pop() || '').toLowerCase();
+        // Strip timestamp prefix if present
+        const stripped = base.replace(/^(\d{10,14}|opt)[-_]/i, '').toLowerCase();
+        if (matched.includes(normUrl)) return;
+        if (stripped && matchedFiles.has(stripped)) return;
+        matched.push(normUrl);
+        if (stripped) matchedFiles.add(stripped);
+      };
 
       // RULE 1: EXACT SKU FOLDER MATCH (User request: matches cleaned SKU "P834" or original "P834bbx")
       for (const img of photoImages) {
@@ -1091,9 +1109,7 @@ export default function BulkListingModal({
 
           if (isFolderMatch) {
             matchedFolderName = img.folderName;
-            if (!matched.includes(img.url)) {
-              matched.push(img.url);
-            }
+            addUniqueMatch(img.url, img.filename);
           }
         }
       }
@@ -1131,9 +1147,7 @@ export default function BulkListingModal({
         for (const img of photoImages) {
           const baseName = img.filename.toLowerCase();
           if (explicitNames.has(baseName)) {
-            if (!matched.includes(img.url)) {
-              matched.push(img.url);
-            }
+            addUniqueMatch(img.url, img.filename);
           }
         }
       }
@@ -1146,9 +1160,7 @@ export default function BulkListingModal({
             (alphaNumSku && (imgBase.startsWith(alphaNumSku) || imgBase.includes(alphaNumSku))) ||
             (alphaNumOrig && (imgBase.startsWith(alphaNumOrig) || imgBase.includes(alphaNumOrig)))
           ) {
-            if (!matched.includes(img.url)) {
-              matched.push(img.url);
-            }
+            addUniqueMatch(img.url, img.filename);
           }
         }
       }
@@ -1166,7 +1178,7 @@ export default function BulkListingModal({
 
       return {
         ...row,
-        matchedImageUrls: matched.filter((u) => !isVideoMedia(u)),
+        matchedImageUrls: deduplicateImageUrls(matched),
         matchedFolderName,
         videoUrl: matchedVideoUrl,
         status,
@@ -1213,10 +1225,11 @@ export default function BulkListingModal({
     try {
       // Build items payload with category-specific compiled HTML templates
       const itemsPayload = parsedRows.map((row) => {
-        const finalImages = (row.matchedImageUrls.length > 0
-          ? row.matchedImageUrls
-          : ['https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=500&auto=format&fit=crop&q=60']
-        ).filter((u) => !isVideoMedia(u));
+        const finalImages = deduplicateImageUrls(
+          row.matchedImageUrls.length > 0
+            ? row.matchedImageUrls
+            : ['https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=500&auto=format&fit=crop&q=60']
+        );
 
         let descriptionHtml = '';
 
