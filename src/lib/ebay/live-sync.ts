@@ -1,7 +1,7 @@
 import { getStore, saveStore, saveStoreAsync } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, EbayMessage } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
-import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml, deduplicateImageUrls } from './template-engine';
+import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml, deduplicateImageUrls, isJunkMessageOrCss } from './template-engine';
 import fs from 'fs';
 import path from 'path';
 
@@ -505,6 +505,9 @@ export async function reviseLiveEbayListing(
     paymentPolicyId?: string;
     paymentPolicyName?: string;
     scheduledTime?: string;
+    locationCountry?: string;
+    locationPostalCode?: string;
+    locationCityState?: string;
   }
 ): Promise<{ success: boolean; message: string }> {
   const store = getStore();
@@ -653,6 +656,20 @@ export async function reviseLiveEbayListing(
     itemXmlFields += profilesXml;
   }
 
+  // Location fields configured per account or listing
+  const targetCountry = updates.locationCountry || account.locationCountry;
+  const targetPostal = updates.locationPostalCode || account.locationPostalCode;
+  const targetCityState = updates.locationCityState || account.locationCityState;
+  if (targetCountry) {
+    itemXmlFields += `<Country>${targetCountry}</Country>`;
+  }
+  if (targetPostal) {
+    itemXmlFields += `<PostalCode>${targetPostal}</PostalCode>`;
+  }
+  if (targetCityState) {
+    itemXmlFields += `<Location><![CDATA[${targetCityState}]]></Location>`;
+  }
+
   const reviseXml = `<?xml version="1.0" encoding="utf-8"?>
 <ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <ErrorLanguage>en_US</ErrorLanguage>
@@ -735,6 +752,9 @@ export async function addLiveEbayListing(
     paymentPolicyId?: string;
     paymentPolicyName?: string;
     scheduledTime?: string;
+    locationCountry?: string;
+    locationPostalCode?: string;
+    locationCityState?: string;
   }
 ): Promise<{ success: boolean; itemId?: string; message: string }> {
   const store = getStore();
@@ -831,13 +851,14 @@ export async function addLiveEbayListing(
     ${listing.sku ? `<SKU><![CDATA[${listing.sku}]]></SKU>` : ''}
     <ConditionID>${listing.conditionId || '3000'}</ConditionID>
     ${listing.conditionDescription ? `<ConditionDescription><![CDATA[${listing.conditionDescription}]]></ConditionDescription>` : ''}
-    <Country>US</Country>
+    <Country>${listing.locationCountry || account.locationCountry || 'US'}</Country>
     <Currency>${account.currency || 'USD'}</Currency>
     <DispatchTimeMax>10</DispatchTimeMax>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     ${listing.scheduledTime ? `<ScheduleTime>${new Date(listing.scheduledTime).toISOString()}</ScheduleTime>` : ''}
-    <PostalCode>16701</PostalCode>
+    <PostalCode>${listing.locationPostalCode || account.locationPostalCode || '16701'}</PostalCode>
+    ${(listing.locationCityState || account.locationCityState) ? `<Location><![CDATA[${listing.locationCityState || account.locationCityState}]]></Location>` : ''}
     ${(() => {
       const norm = normalizePolicies({
         shippingId: listing.shippingPolicyId || account.shippingPolicyId,
@@ -1034,14 +1055,26 @@ export function parseChatHistoryFromEbayText(
 ): EbayMessage[] {
   if (!rawText || !rawText.trim()) return [];
 
-  // 1. Clean HTML tags and decode entities
-  let cleaned = decodeXmlEntities(rawText)
+  // 1. First strip full HTML style blocks, script blocks, head blocks, and comments completely
+  let stripped = rawText
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<head[\s\S]*?<\/head>/gi, '')
+    .replace(/<!--[\s\S]*?-->/gi, '')
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, '');
+
+  let cleaned = decodeXmlEntities(stripped)
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
     .replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, '\n--- Original Message ---\n$1\n')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .trim();
+
+  // If the remaining text is CSS junk or boilerplate, reject it
+  if (isJunkMessageOrCss(cleaned)) {
+    return [];
+  }
 
   // Common eBay thread reply delimiters
   const splitPattern = /(?:-{3,}\s*(?:Original|Previous)\s*Message\s*-{3,}|\r?\n-{4,}\r?\n|On\s+[\w\s,:]+\s+wrote:|From:\s*[^\r\n<]+\s*(?:Sent|To):)/i;
@@ -1065,7 +1098,7 @@ export function parseChatHistoryFromEbayText(
   let turnIndex = 0;
   for (const part of rawParts) {
     const trimmed = part.trim();
-    if (!trimmed || trimmed.length < 2) continue;
+    if (!trimmed || trimmed.length < 2 || isJunkMessageOrCss(trimmed)) continue;
 
     let sender = buyerUsername;
     let senderRole: 'BUYER' | 'SELLER' = 'BUYER';
@@ -1113,7 +1146,7 @@ export function parseChatHistoryFromEbayText(
       .replace(/Item Number:\s*[^\r\n<]+/gi, '')
       .trim();
 
-    if (turnBody && turnBody.length > 1) {
+    if (turnBody && turnBody.length > 1 && !isJunkMessageOrCss(turnBody)) {
       parsedMsgs.push({
         id: `msg-${messageId}-${turnIndex}`,
         sender,
@@ -1126,28 +1159,35 @@ export function parseChatHistoryFromEbayText(
   }
 
   // Quoted text was ordered from newest to oldest. Reverse to display in chronological conversation order.
-  return parsedMsgs.length > 0 ? parsedMsgs.reverse() : [
-    {
-      id: `msg-${messageId}`,
-      sender: buyerUsername,
-      senderRole: 'BUYER',
-      timestamp: messageDate,
-      body: cleaned,
-    },
-  ];
+  if (parsedMsgs.length > 0) {
+    return parsedMsgs.reverse();
+  }
+  return !isJunkMessageOrCss(cleaned) && cleaned.length > 0
+    ? [
+        {
+          id: `msg-${messageId}`,
+          sender: buyerUsername,
+          senderRole: 'BUYER',
+          timestamp: messageDate,
+          body: cleaned,
+        },
+      ]
+    : [];
 }
 
-// Helper: Safely merge conversation messages without dropping past replies
+// Helper: Safely merge conversation messages without dropping past replies, stripping CSS junk
 function mergeThreadMessages(existing: EbayMessage[], incoming: EbayMessage[]): EbayMessage[] {
   const map = new Map<string, EbayMessage>();
   const norm = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 
   for (const m of existing) {
+    if (isJunkMessageOrCss(m.body)) continue;
     const key = `${m.senderRole}-${norm(m.body)}`;
     map.set(key, m);
   }
 
   for (const m of incoming) {
+    if (isJunkMessageOrCss(m.body)) continue;
     const key = `${m.senderRole}-${norm(m.body)}`;
     if (!map.has(key)) {
       map.set(key, m);
@@ -1466,16 +1506,32 @@ export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack =
       );
 
       if (idx >= 0) {
-        const mergedMsgs = mergeThreadMessages(existingAccountThreads[idx].messages, incomingThr.messages);
+        const existing = existingAccountThreads[idx];
+        const mergedMsgs = mergeThreadMessages(existing.messages, incomingThr.messages);
         const lastMsg = mergedMsgs[mergedMsgs.length - 1];
+
+        // Check if a truly new message arrived from BUYER
+        const existingMsgCount = existing.messages?.length || 0;
+        const hasNewIncomingBuyerMsg =
+          mergedMsgs.length > existingMsgCount && lastMsg?.senderRole === 'BUYER';
+
+        // Preserve read status if user already read it! Only mark unread if new buyer message arrived
+        const updatedUnread = hasNewIncomingBuyerMsg ? true : existing.unread;
+
         existingAccountThreads[idx] = {
-          ...existingAccountThreads[idx],
+          ...existing,
           ...incomingThr,
+          unread: updatedUnread,
           messages: mergedMsgs,
           lastMessageSnippet: lastMsg?.body?.slice(0, 120) || incomingThr.lastMessageSnippet,
           lastUpdated: lastMsg?.timestamp || incomingThr.lastUpdated,
         };
       } else {
+        // If it's a new thread, but the last message is from SELLER, it was already replied to
+        const lastMsg = incomingThr.messages[incomingThr.messages.length - 1];
+        if (lastMsg && lastMsg.senderRole === 'SELLER') {
+          incomingThr.unread = false;
+        }
         existingAccountThreads.unshift(incomingThr);
       }
     }

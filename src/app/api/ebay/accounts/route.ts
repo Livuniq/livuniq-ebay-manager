@@ -54,13 +54,16 @@ export async function POST(request: Request) {
       });
     }
 
-    // Action 3: Rename store display name or update username
+    // Action 3: Rename store display name, update username, or configure item location
     if (body.action === 'rename' || body.action === 'update') {
       const store = getStore();
       const target = store.accounts.find((a) => a.id === body.accountId);
       if (target) {
-        if (body.storeName) target.storeName = body.storeName.trim();
-        if (body.ebayUsername) target.ebayUsername = body.ebayUsername.trim();
+        if (body.storeName !== undefined) target.storeName = body.storeName.trim();
+        if (body.ebayUsername !== undefined) target.ebayUsername = body.ebayUsername.trim();
+        if (body.locationCountry !== undefined) target.locationCountry = body.locationCountry.trim().toUpperCase();
+        if (body.locationPostalCode !== undefined) target.locationPostalCode = body.locationPostalCode.trim();
+        if (body.locationCityState !== undefined) target.locationCityState = body.locationCityState.trim();
         await saveStoreAsync(store);
         return NextResponse.json({ success: true, account: target });
       }

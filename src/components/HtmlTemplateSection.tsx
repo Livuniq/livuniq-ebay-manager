@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Code,
   Eye,
@@ -19,6 +19,7 @@ import {
   ListingTemplateData,
   renderDescriptionTemplate,
   cleanAndDecodeDescription,
+  sanitizeGalleryHtml,
   DEFAULT_TEMPLATES,
 } from '@/lib/ebay/template-engine';
 
@@ -44,6 +45,8 @@ export default function HtmlTemplateSection({
   const [newTemplateName, setNewTemplateName] = useState('');
   const [savingStatus, setSavingStatus] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const lastEmittedValueRef = useRef<string>(value || '');
+  const isFirstMountRef = useRef(true);
 
   // Load saved templates from API
   useEffect(() => {
@@ -57,23 +60,33 @@ export default function HtmlTemplateSection({
       .catch((err) => console.error('Failed to load templates:', err));
   }, []);
 
-  // Sync initial value if empty or update when listing description value loads
+  // Sync initial value if empty or update when listing description value loads from outside
   useEffect(() => {
-    if (!value && rawTemplate) {
-      const rendered = renderDescriptionTemplate(rawTemplate, listingData);
-      onChange(rendered);
-    } else if (value) {
+    if (isFirstMountRef.current) {
+      isFirstMountRef.current = false;
+      if (!value && rawTemplate) {
+        const rendered = renderDescriptionTemplate(rawTemplate, listingData);
+        lastEmittedValueRef.current = rendered;
+        onChange(rendered);
+      } else if (value) {
+        lastEmittedValueRef.current = value;
+      }
+      return;
+    }
+
+    // Only sync if value changed externally from outside (not from our own onChange call)
+    if (value !== lastEmittedValueRef.current) {
+      lastEmittedValueRef.current = value;
       const cleaned = cleanAndDecodeDescription(value);
-      setRawTemplate(cleaned);
-      const compiled = renderDescriptionTemplate(cleaned, listingData);
-      onChange(compiled);
+      setRawTemplate(cleaned || DEFAULT_TEMPLATES[0].html);
     }
   }, [value]);
 
-  // When raw template or listing data changes, compile to parent onChange
+  // When raw template changes, compile and notify parent
   const handleTemplateChange = (newRaw: string) => {
     setRawTemplate(newRaw);
     const compiled = renderDescriptionTemplate(newRaw, listingData);
+    lastEmittedValueRef.current = compiled;
     onChange(compiled);
   };
 
@@ -109,8 +122,14 @@ export default function HtmlTemplateSection({
     }, 50);
   };
 
-  // Compile current preview
-  const compiledHtml = renderDescriptionTemplate(rawTemplate, listingData);
+  // Compile current preview safely
+  const compiledHtml = useMemo(() => {
+    if (!rawTemplate) return '';
+    if (!rawTemplate.includes('{{')) {
+      return sanitizeGalleryHtml(rawTemplate);
+    }
+    return renderDescriptionTemplate(rawTemplate, listingData);
+  }, [rawTemplate, listingData]);
 
   // Copy HTML
   const handleCopy = () => {
@@ -396,10 +415,12 @@ export default function HtmlTemplateSection({
               <CheckCircle className="w-3.5 h-3.5" /> Mobile & Desktop Ready
             </span>
           </div>
-          <div className="p-4 max-h-[550px] overflow-y-auto">
-            <div
-              className="prose max-w-none text-xs"
-              dangerouslySetInnerHTML={{ __html: compiledHtml }}
+          <div className="w-full h-[560px] bg-slate-50">
+            <iframe
+              srcDoc={compiledHtml || '<div style="padding:20px;font-family:sans-serif;color:#666;">No description content yet.</div>'}
+              className="w-full h-full border-0 bg-white"
+              title="eBay HTML Preview"
+              sandbox="allow-same-origin"
             />
           </div>
         </div>

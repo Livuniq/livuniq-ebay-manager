@@ -32,7 +32,9 @@ import {
   Trash2,
   Key,
   UploadCloud,
+  Save,
 } from 'lucide-react';
+import { isJunkMessageOrCss } from '@/lib/ebay/template-engine';
 import {
   ConnectedAccount,
   EbayListing,
@@ -366,6 +368,63 @@ export default function Home() {
       }
     } catch (err) {
       console.error('Disconnect error:', err);
+    }
+  };
+
+  // Per-Store Location Configuration
+  const [storeLocations, setStoreLocations] = useState<Record<string, { country: string; postalCode: string; cityState: string }>>({});
+  const [storeLocationSaving, setStoreLocationSaving] = useState<Record<string, boolean>>({});
+  const [storeLocationSaved, setStoreLocationSaved] = useState<Record<string, boolean>>({});
+
+  const handleStoreLocationChange = (accountId: string, field: 'country' | 'postalCode' | 'cityState', value: string) => {
+    setStoreLocations((prev) => {
+      const current = prev[accountId] || {
+        country: accounts.find((a) => a.id === accountId)?.locationCountry || 'US',
+        postalCode: accounts.find((a) => a.id === accountId)?.locationPostalCode || '',
+        cityState: accounts.find((a) => a.id === accountId)?.locationCityState || '',
+      };
+      return {
+        ...prev,
+        [accountId]: {
+          ...current,
+          [field]: value,
+        },
+      };
+    });
+  };
+
+  const handleSaveStoreLocation = async (accountId: string) => {
+    const acc = accounts.find((a) => a.id === accountId);
+    const target = storeLocations[accountId] || {
+      country: acc?.locationCountry || 'US',
+      postalCode: acc?.locationPostalCode || '',
+      cityState: acc?.locationCityState || '',
+    };
+    setStoreLocationSaving((prev) => ({ ...prev, [accountId]: true }));
+    try {
+      const res = await fetch('/api/ebay/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update',
+          accountId,
+          locationCountry: target.country.trim().toUpperCase(),
+          locationPostalCode: target.postalCode.trim(),
+          locationCityState: target.cityState.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.account) {
+        setAccounts((prev) => prev.map((a) => (a.id === accountId ? data.account : a)));
+        setStoreLocationSaved((prev) => ({ ...prev, [accountId]: true }));
+        setTimeout(() => {
+          setStoreLocationSaved((prev) => ({ ...prev, [accountId]: false }));
+        }, 3000);
+      }
+    } catch (err) {
+      console.error('Failed to save store location:', err);
+    } finally {
+      setStoreLocationSaving((prev) => ({ ...prev, [accountId]: false }));
     }
   };
 
@@ -2127,9 +2186,11 @@ export default function Home() {
                         {/* Messages Thread Scrollable Area */}
                         <div ref={chatScrollRef} className="flex-1 min-h-0 p-4 overflow-y-auto space-y-3.5">
                           {(() => {
-                            const sortedMsgs = [...activeThread.messages].sort(
-                              (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                            );
+                            const sortedMsgs = [...activeThread.messages]
+                              .filter((m) => !isJunkMessageOrCss(m.body))
+                              .sort(
+                                (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                              );
 
                             return sortedMsgs.map((msg, idx) => {
                               const isSeller = msg.senderRole === 'SELLER';
@@ -2292,6 +2353,70 @@ export default function Home() {
                         <div>
                           <span className="text-slate-400 block text-[10px]">Last Synced</span>
                           <span className="font-semibold text-slate-700">{new Date(acc.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </div>
+
+                      {/* Item Location & Shipping Origin for this Store */}
+                      <div className="bg-slate-50/80 border border-slate-200/90 rounded-lg p-3 space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Default Item Location (eBay Trading API)</span>
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-medium">Used for new & revised listings</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Country Code</label>
+                            <input
+                              type="text"
+                              value={storeLocations[acc.id]?.country ?? (acc.locationCountry || (acc.marketplace === 'EBAY_IN' ? 'IN' : acc.marketplace === 'EBAY_GB' ? 'GB' : 'US'))}
+                              onChange={(e) => handleStoreLocationChange(acc.id, 'country', e.target.value.toUpperCase())}
+                              placeholder="e.g. US, IN, GB"
+                              maxLength={3}
+                              className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs font-semibold uppercase"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Postal / Zip Code</label>
+                            <input
+                              type="text"
+                              value={storeLocations[acc.id]?.postalCode ?? (acc.locationPostalCode || '')}
+                              onChange={(e) => handleStoreLocationChange(acc.id, 'postalCode', e.target.value)}
+                              placeholder="e.g. 16701 or 395006"
+                              className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">City / State / Region</label>
+                            <input
+                              type="text"
+                              value={storeLocations[acc.id]?.cityState ?? (acc.locationCityState || '')}
+                              onChange={(e) => handleStoreLocationChange(acc.id, 'cityState', e.target.value)}
+                              placeholder="e.g. Bradford, PA or Surat"
+                              className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-xs"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveStoreLocation(acc.id)}
+                            disabled={storeLocationSaving[acc.id]}
+                            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-1 rounded text-xs font-semibold flex items-center space-x-1 transition shadow-xs cursor-pointer"
+                          >
+                            {storeLocationSaved[acc.id] ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-emerald-300" />
+                                <span>Location Saved!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Save className="w-3.5 h-3.5" />
+                                <span>{storeLocationSaving[acc.id] ? 'Saving...' : 'Save Item Location'}</span>
+                              </>
+                            )}
+                          </button>
                         </div>
                       </div>
 

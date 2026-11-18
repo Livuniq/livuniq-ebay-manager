@@ -18,6 +18,9 @@ export interface ConnectedAccount {
   returnPolicyName?: string;
   paymentPolicyId?: string;
   paymentPolicyName?: string;
+  locationCountry?: string;
+  locationPostalCode?: string;
+  locationCityState?: string;
   templates?: any[];
   specificsMapping?: any[];
   categoryProfiles?: any[];
@@ -51,6 +54,9 @@ export interface EbayListing {
   paymentPolicyId?: string;
   paymentPolicyName?: string;
   personalization?: string;
+  locationCountry?: string;
+  locationPostalCode?: string;
+  locationCityState?: string;
   status: 'ACTIVE' | 'OUT_OF_STOCK' | 'ENDED' | 'DRAFT';
   ebayListingId?: string;
   hasUnpublishedChanges?: boolean;

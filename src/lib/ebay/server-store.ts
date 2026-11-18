@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { initialMasterConfig, initialAccounts, initialListings, initialOrders, initialThreads } from './data';
 import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, MasterAppConfig } from './types';
-import { DescriptionTemplate, DEFAULT_TEMPLATES } from './template-engine';
+import { DescriptionTemplate, DEFAULT_TEMPLATES, isJunkMessageOrCss } from './template-engine';
 import { isDbConfigured, fetchDbState, persistDbState } from './db';
 import {
   DEFAULT_SPECIFICS_MAPPINGS,
@@ -284,6 +284,15 @@ export function connectNewAccount(params: {
   return newAccount;
 }
 
+export function updateConnectedAccount(accountId: string, updates: Partial<ConnectedAccount>): ConnectedAccount | null {
+  const store = getStore();
+  const acc = store.accounts.find((a) => a.id === accountId);
+  if (!acc) return null;
+  Object.assign(acc, updates);
+  saveStore(store);
+  return acc;
+}
+
 export function disconnectAccount(accountId: string): boolean {
   const store = getStore();
   store.accounts = store.accounts.filter((a) => a.id !== accountId);
@@ -410,7 +419,22 @@ export function getMessageThreads(accountId?: string): EbayMessageThread[] {
   if (!targetAccount || !store.accounts.some((a) => a.id === targetAccount)) {
     return [];
   }
-  return store.threads.filter((t) => t.accountId === targetAccount);
+  return store.threads
+    .filter((t) => t.accountId === targetAccount)
+    .map((t) => {
+      const cleanMsgs = (t.messages || []).filter((m) => !isJunkMessageOrCss(m.body));
+      const lastMsg = cleanMsgs[cleanMsgs.length - 1];
+      const cleanSnippet = lastMsg
+        ? lastMsg.body.slice(0, 120)
+        : isJunkMessageOrCss(t.lastMessageSnippet)
+        ? 'Buyer inquiry'
+        : t.lastMessageSnippet;
+      return {
+        ...t,
+        messages: cleanMsgs,
+        lastMessageSnippet: cleanSnippet,
+      };
+    });
 }
 
 export function sendReply(threadId: string, body: string, senderName?: string): EbayMessageThread | null {

@@ -319,6 +319,36 @@ export function sanitizeGalleryHtml(html: string): string {
   return cleaned;
 }
 
+export function isJunkMessageOrCss(text: string): boolean {
+  if (!text || !text.trim()) return true;
+  const t = text.trim();
+  if (
+    /@media\s+[^{]+\{/i.test(t) ||
+    /body\[yahoo\]/i.test(t) ||
+    /\.device-width/i.test(t) ||
+    /\.threeColumns/i.test(t) ||
+    /\.fourColumns/i.test(t) ||
+    /!important/i.test(t) ||
+    /\{[\s\S]*?(?:width|margin|padding|font-size|background|color)\s*:[^;]+;/i.test(t) ||
+    /<style[\s\S]*?>/i.test(t) ||
+    /<\/style>/i.test(t) ||
+    /<head[\s\S]*?>/i.test(t) ||
+    /<!DOCTYPE/i.test(t)
+  ) {
+    return true;
+  }
+  if (
+    /This administrative email was sent/i.test(t) ||
+    /eBay sent this message to/i.test(t) ||
+    /Learn more about account protection/i.test(t) ||
+    /Copyright © \d{4} eBay/i.test(t) ||
+    /Questions\? Visit our Help Center/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function cleanAndDecodeDescription(rawDesc?: string | null): string {
   if (!rawDesc || typeof rawDesc !== 'string') return '';
   let str = rawDesc.trim();

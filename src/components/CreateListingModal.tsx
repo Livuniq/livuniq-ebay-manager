@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Upload,
@@ -17,6 +17,7 @@ import {
   FileText,
   DollarSign,
   Save,
+  MapPin,
 } from 'lucide-react';
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
 import { EBAY_JEWELRY_CATEGORIES, EBAY_FILE_EXCHANGE_CONDITIONS } from '@/lib/ebay/constants';
@@ -101,6 +102,19 @@ export default function CreateListingModal({
   const [returnPolicyName, setReturnPolicyName] = useState(activeAccount?.returnPolicyName || '');
   const [paymentPolicyId, setPaymentPolicyId] = useState(activeAccount?.paymentPolicyId || '6269966000');
   const [paymentPolicyName, setPaymentPolicyName] = useState(activeAccount?.paymentPolicyName || '');
+
+  // Item Location
+  const [locationCountry, setLocationCountry] = useState(activeAccount?.locationCountry || 'US');
+  const [locationPostalCode, setLocationPostalCode] = useState(activeAccount?.locationPostalCode || '');
+  const [locationCityState, setLocationCityState] = useState(activeAccount?.locationCityState || '');
+
+  useEffect(() => {
+    if (activeAccount) {
+      if (activeAccount.locationCountry) setLocationCountry(activeAccount.locationCountry);
+      if (activeAccount.locationPostalCode) setLocationPostalCode(activeAccount.locationPostalCode);
+      if (activeAccount.locationCityState) setLocationCityState(activeAccount.locationCityState);
+    }
+  }, [activeAccount]);
 
   // Media
   const [images, setImages] = useState<string[]>([]);
@@ -298,6 +312,9 @@ export default function CreateListingModal({
           returnPolicyName,
           paymentPolicyId,
           paymentPolicyName,
+          locationCountry: locationCountry.trim().toUpperCase() || activeAccount?.locationCountry || 'US',
+          locationPostalCode: locationPostalCode.trim() || activeAccount?.locationPostalCode || '',
+          locationCityState: locationCityState.trim() || activeAccount?.locationCityState || '',
           publishToEbay,
         }),
       });
@@ -592,6 +609,50 @@ export default function CreateListingModal({
                 paymentPolicyName={paymentPolicyName}
                 setPaymentPolicyName={setPaymentPolicyName}
               />
+
+              {/* Item Location & Shipping Origin */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Item Location (eBay Trading API)</span>
+                  </h4>
+                  <span className="text-[10px] text-slate-500">Auto-filled from connected store settings</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Country Code</label>
+                    <input
+                      type="text"
+                      value={locationCountry}
+                      onChange={(e) => setLocationCountry(e.target.value.toUpperCase())}
+                      placeholder="US, IN, GB"
+                      maxLength={3}
+                      className="w-full bg-white border border-slate-300 rounded px-2.5 py-1 text-xs font-semibold uppercase"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Postal / Zip Code</label>
+                    <input
+                      type="text"
+                      value={locationPostalCode}
+                      onChange={(e) => setLocationPostalCode(e.target.value)}
+                      placeholder="e.g. 16701 or 395006"
+                      className="w-full bg-white border border-slate-300 rounded px-2.5 py-1 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">City, State / Region</label>
+                    <input
+                      type="text"
+                      value={locationCityState}
+                      onChange={(e) => setLocationCityState(e.target.value)}
+                      placeholder="e.g. Bradford, PA or Surat"
+                      className="w-full bg-white border border-slate-300 rounded px-2.5 py-1 text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

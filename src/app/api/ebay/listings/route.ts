@@ -76,6 +76,9 @@ export async function POST(request: Request) {
         returnPolicyName: data.returnPolicyName,
         paymentPolicyId: data.paymentPolicyId,
         paymentPolicyName: data.paymentPolicyName,
+        locationCountry: data.locationCountry || account?.locationCountry,
+        locationPostalCode: data.locationPostalCode || account?.locationPostalCode,
+        locationCityState: data.locationCityState || account?.locationCityState,
       });
 
       console.log('addLiveEbayListing result:', addResult);
@@ -118,6 +121,9 @@ export async function POST(request: Request) {
       paymentPolicyId: data.paymentPolicyId,
       paymentPolicyName: data.paymentPolicyName,
       personalization: data.personalization || '',
+      locationCountry: data.locationCountry || account?.locationCountry || 'US',
+      locationPostalCode: data.locationPostalCode || account?.locationPostalCode || '',
+      locationCityState: data.locationCityState || account?.locationCityState || '',
       status: shouldPublishToEbay ? ((parseInt(data.quantity) || 1) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK') : 'DRAFT',
       ebayListingId: liveItemId,
       hasUnpublishedChanges: !shouldPublishToEbay || ebayLiveStatus !== 'LIVE_CREATED',
@@ -239,6 +245,9 @@ export async function PATCH(request: Request) {
             paymentPolicyId: currentListing.paymentPolicyId,
             paymentPolicyName: currentListing.paymentPolicyName,
             scheduledTime: currentListing.scheduledTime,
+            locationCountry: currentListing.locationCountry || account?.locationCountry,
+            locationPostalCode: currentListing.locationPostalCode || account?.locationPostalCode,
+            locationCityState: currentListing.locationCityState || account?.locationCityState,
           });
 
           console.log('eBay reviseLiveEbayListing result:', reviseResult);
@@ -336,6 +345,9 @@ export async function PATCH(request: Request) {
             paymentPolicyId: currentListing.paymentPolicyId,
             paymentPolicyName: currentListing.paymentPolicyName,
             scheduledTime: currentListing.scheduledTime,
+            locationCountry: currentListing.locationCountry || account?.locationCountry,
+            locationPostalCode: currentListing.locationPostalCode || account?.locationPostalCode,
+            locationCityState: currentListing.locationCityState || account?.locationCityState,
           });
 
           console.log('Direct addLiveEbayListing result:', addResult);
