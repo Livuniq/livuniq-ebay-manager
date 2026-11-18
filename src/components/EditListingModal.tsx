@@ -20,6 +20,7 @@ import {
   UploadCloud,
   Clock,
   Calendar,
+  FolderUp,
 } from 'lucide-react';
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
 import { EBAY_JEWELRY_CATEGORIES, EBAY_FILE_EXCHANGE_CONDITIONS } from '@/lib/ebay/constants';
@@ -129,6 +130,7 @@ export default function EditListingModal({
   const [isScheduled, setIsScheduled] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderReplaceInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -233,6 +235,63 @@ export default function EditListingModal({
     } finally {
       setUploadingFiles(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // Handle folder upload to completely remove all old photos and replace with new ones
+  const handleFolderReplacePhotos = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploadingFiles(true);
+    setErrorMessage('');
+    try {
+      const sortedFiles = Array.from(files)
+        .filter((f) => f.type.startsWith('image/') || /\.(jpe?g|png|webp|avif)$/i.test(f.name))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+      if (sortedFiles.length === 0) {
+        setErrorMessage('Selected folder me koi valid photo nahi mili.');
+        return;
+      }
+
+      const newUrls: string[] = [];
+
+      for (const file of sortedFiles) {
+        let fileUrl = '';
+        try {
+          const formData = new FormData();
+          formData.append('files', file);
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.files && data.files[0]) {
+              fileUrl = data.files[0].url;
+            }
+          }
+        } catch {
+          // fallback
+        }
+
+        if (!fileUrl) {
+          fileUrl = URL.createObjectURL(file);
+        }
+        newUrls.push(fileUrl);
+      }
+
+      if (newUrls.length > 0) {
+        // Remove old images completely and replace with new images from folder!
+        setImages(newUrls);
+        setSuccessMessage(`All old images removed! Replaced with ${newUrls.length} photos from folder.`);
+      }
+    } catch (err: any) {
+      setErrorMessage((err as Error).message);
+    } finally {
+      setUploadingFiles(false);
+      if (folderReplaceInputRef.current) folderReplaceInputRef.current.value = '';
     }
   };
 
@@ -742,14 +801,35 @@ export default function EditListingModal({
                       multiple
                       className="hidden"
                     />
+                    <input
+                      type="file"
+                      ref={folderReplaceInputRef}
+                      onChange={handleFolderReplacePhotos}
+                      // @ts-ignore
+                      webkitdirectory="true"
+                      directory=""
+                      multiple
+                      className="hidden"
+                    />
                     <button
                       type="button"
                       disabled={uploadingFiles}
                       onClick={() => fileInputRef.current?.click()}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg flex items-center space-x-1.5 transition shadow-xs cursor-pointer"
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-2 rounded-lg flex items-center space-x-1.5 transition border border-slate-300 cursor-pointer"
                     >
-                      {uploadingFiles ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                      <span>Choose Photos from Computer</span>
+                      <Upload className="w-4 h-4" />
+                      <span>Add Photos</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={uploadingFiles}
+                      onClick={() => folderReplaceInputRef.current?.click()}
+                      className="bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-semibold px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition shadow-xs cursor-pointer"
+                      title="Select photo folder to remove all old images and replace with new images"
+                    >
+                      {uploadingFiles ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderUp className="w-4 h-4" />}
+                      <span>Replace All with Folder</span>
                     </button>
                   </div>
                 </div>

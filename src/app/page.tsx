@@ -46,7 +46,8 @@ import BulkListingModal from '@/components/BulkListingModal';
 import MasterSpecificsMapping from '@/components/MasterSpecificsMapping';
 import MasterHtmlTemplates from '@/components/MasterHtmlTemplates';
 import MasterDescriptionEditorModal from '@/components/MasterDescriptionEditorModal';
-import { FileSpreadsheet, SlidersHorizontal, FileCode, Replace } from 'lucide-react';
+import BulkImageUpdateModal from '@/components/BulkImageUpdateModal';
+import { FileSpreadsheet, SlidersHorizontal, FileCode, Replace, Camera } from 'lucide-react';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'overview' | 'listings' | 'orders' | 'messages' | 'stores' | 'settings' | 'specifics-mapping' | 'templates-master'>('overview');
@@ -78,6 +79,7 @@ export default function Home() {
   const [showAddListingModal, setShowAddListingModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showMasterDescModal, setShowMasterDescModal] = useState(false);
+  const [showBulkImageModal, setShowBulkImageModal] = useState(false);
   const [showEditListingModal, setShowEditListingModal] = useState<EbayListing | null>(null);
   const [showFulfillModal, setShowFulfillModal] = useState<EbayOrder | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
@@ -1442,6 +1444,15 @@ export default function Home() {
                   </button>
 
                   <button
+                    onClick={() => setShowBulkImageModal(true)}
+                    className="flex items-center space-x-1.5 bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
+                    title="Select photo folder to automatically match SKU, remove all old images and replace with new images"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Update Images (by SKU)</span>
+                  </button>
+
+                  <button
                     onClick={() => setShowMasterDescModal(true)}
                     className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer"
                     title="Find and replace text or HTML snippets across all descriptions (From ➔ To Editor)"
@@ -2479,6 +2490,19 @@ export default function Home() {
         accountId={activeAccountId}
         listings={listings}
         onComplete={async () => {
+          await fetchAccountsAndData(activeAccountId);
+        }}
+      />
+
+      {/* BULK IMAGE UPDATE MODAL (FOLDER NAME WITH SKU MATCH & REPLACE) */}
+      <BulkImageUpdateModal
+        isOpen={showBulkImageModal}
+        onClose={() => setShowBulkImageModal(false)}
+        activeAccount={activeAccount}
+        listings={listings}
+        onImagesUpdated={async (updatedListings) => {
+          const map = new Map(updatedListings.map((l) => [l.id, l]));
+          setListings((prev) => prev.map((l) => map.get(l.id) || l));
           await fetchAccountsAndData(activeAccountId);
         }}
       />
