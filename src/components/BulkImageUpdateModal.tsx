@@ -44,6 +44,7 @@ interface SkuImageGroup {
     size?: number;
   }>;
   videoUrl?: string;
+  videoId?: string;
   selected: boolean;
 }
 
@@ -285,6 +286,7 @@ export default function BulkImageUpdateModal({
         }) || null;
 
         let groupVideoUrl: string | undefined = undefined;
+        let groupVideoId: string | undefined = undefined;
         if (item.videoFile) {
           try {
             const vidFormData = new FormData();
@@ -301,6 +303,7 @@ export default function BulkImageUpdateModal({
               const vData = await vRes.json();
               if (vData.success && vData.files && vData.files.length > 0) {
                 groupVideoUrl = vData.files[0].url;
+                groupVideoId = vData.files[0].videoId;
               }
             }
           } catch {
@@ -314,6 +317,7 @@ export default function BulkImageUpdateModal({
           matchedListing: matched,
           files: stagedFiles,
           videoUrl: groupVideoUrl,
+          videoId: groupVideoId,
           selected: Boolean(matched),
         });
       }
@@ -374,6 +378,7 @@ export default function BulkImageUpdateModal({
           url: imgUrl,
         })),
         videoUrl: g.videoUrl,
+        videoId: g.videoId,
         selected: Boolean(g.matchedListing),
       }));
 
@@ -440,6 +445,7 @@ export default function BulkImageUpdateModal({
           sku: g.matchedListing!.sku,
           images: cleanNewUrls,
           videoUrl: g.videoUrl,
+          videoId: g.videoId,
         };
 
         const res = await fetch('/api/ebay/listings/bulk-update-images', {
@@ -470,7 +476,7 @@ export default function BulkImageUpdateModal({
           images: cleanNewUrls,
           imageUrl: cleanNewUrls[0] || existing.imageUrl,
           videoUrl: g.videoUrl || existing.videoUrl,
-          videoId: serverResult?.videoId || existing.videoId,
+          videoId: serverResult?.videoId || g.videoId || existing.videoId,
           description: updatedDesc,
           hasUnpublishedChanges: !pushLiveToEbay,
           lastUpdated: new Date().toISOString(),

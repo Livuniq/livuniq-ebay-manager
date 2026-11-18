@@ -14,6 +14,7 @@ export async function POST(request: Request) {
       sku: string;
       images: string[];
       videoUrl?: string;
+      videoId?: string;
     }> = body.updates || [];
 
     if (!Array.isArray(updates) || updates.length === 0) {
@@ -46,6 +47,7 @@ export async function POST(request: Request) {
       images?: string[];
       imageUrl?: string;
       videoUrl?: string;
+      videoId?: string;
       success: boolean;
       pushedToEbay: boolean;
       message: string;
@@ -116,6 +118,9 @@ export async function POST(request: Request) {
       if (update.videoUrl) {
         listing.videoUrl = update.videoUrl;
       }
+      if (update.videoId) {
+        listing.videoId = update.videoId;
+      }
 
       // 1b. Update HTML Description so that the template (#gallBlock, carousels, and <img>) renders the new images!
       if (listing.description) {
@@ -143,7 +148,7 @@ export async function POST(request: Request) {
             {
               images: validNewImages,
               videoUrl: update.videoUrl || listing.videoUrl,
-              videoId: listing.videoId,
+              videoId: update.videoId || listing.videoId,
               description: listing.description,
             }
           );
@@ -177,6 +182,7 @@ export async function POST(request: Request) {
         images: listing.images,
         imageUrl: listing.imageUrl,
         videoUrl: listing.videoUrl,
+        videoId: listing.videoId,
         success: true,
         pushedToEbay,
         message: pushedToEbay

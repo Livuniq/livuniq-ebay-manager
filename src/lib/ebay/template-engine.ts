@@ -659,21 +659,71 @@ function extractEbayImageHash(url?: string | null): string | null {
   return match ? match[1] : null;
 }
 
-function isDecorativeImage(url?: string | null): boolean {
+export function isDecorativeOrTemplateImage(url?: string | null, fullTag?: string): boolean {
   if (!url) return true;
-  const lower = url.toLowerCase();
-  return lower.includes('spacer.gif') ||
-         lower.includes('pixel.gif') ||
-         lower.includes('ebay-static') ||
-         lower.includes('rover.ebay.com') ||
-         lower.includes('paypal') ||
-         lower.includes('visa') ||
-         lower.includes('mastercard') ||
-         lower.includes('credit-card') ||
-         lower.includes('payment') ||
-         lower.includes('badge') ||
-         lower.includes('icon_') ||
-         lower.startsWith('data:image/gif;base64,r0lgodlh');
+  const lowerUrl = url.toLowerCase();
+  if (
+    lowerUrl.includes('spacer.gif') ||
+    lowerUrl.includes('pixel.gif') ||
+    lowerUrl.includes('ebay-static') ||
+    lowerUrl.includes('rover.ebay.com') ||
+    lowerUrl.includes('paypal') ||
+    lowerUrl.includes('visa') ||
+    lowerUrl.includes('mastercard') ||
+    lowerUrl.includes('credit-card') ||
+    lowerUrl.includes('payment') ||
+    lowerUrl.includes('badge') ||
+    lowerUrl.includes('igi') ||
+    lowerUrl.includes('cert') ||
+    lowerUrl.includes('logo') ||
+    lowerUrl.includes('banner') ||
+    lowerUrl.includes('marble') ||
+    lowerUrl.includes('footer') ||
+    lowerUrl.includes('header') ||
+    lowerUrl.includes('trust') ||
+    lowerUrl.includes('shield') ||
+    lowerUrl.includes('truck') ||
+    lowerUrl.includes('box') ||
+    lowerUrl.includes('icon_') ||
+    lowerUrl.includes('/icon') ||
+    lowerUrl.startsWith('data:image/gif;base64,r0lgodlh')
+  ) {
+    return true;
+  }
+
+  if (fullTag) {
+    const lowerTag = fullTag.toLowerCase();
+    // Check alt text
+    if (
+      lowerTag.includes('alt="igi') ||
+      lowerTag.includes('alt="logo') ||
+      lowerTag.includes('alt="icon') ||
+      lowerTag.includes('alt="badge') ||
+      lowerTag.includes('alt="banner') ||
+      lowerTag.includes('alt="free shipping') ||
+      lowerTag.includes('alt="shipping') ||
+      lowerTag.includes('alt="returns') ||
+      lowerTag.includes('alt="service') ||
+      lowerTag.includes('alt="security') ||
+      lowerTag.includes('alt="payment') ||
+      lowerTag.includes('alt="authenticity')
+    ) {
+      return true;
+    }
+
+    // Check small explicit dimensions (<= 80px)
+    const widthMatch = lowerTag.match(/width=["']?(\d+)["']?/);
+    if (widthMatch && parseInt(widthMatch[1], 10) <= 80) return true;
+    const heightMatch = lowerTag.match(/height=["']?(\d+)["']?/);
+    if (heightMatch && parseInt(heightMatch[1], 10) <= 80) return true;
+
+    const styleWidthMatch = lowerTag.match(/width:\s*(\d+)px/);
+    if (styleWidthMatch && parseInt(styleWidthMatch[1], 10) <= 80) return true;
+    const styleHeightMatch = lowerTag.match(/height:\s*(\d+)px/);
+    if (styleHeightMatch && parseInt(styleHeightMatch[1], 10) <= 80) return true;
+  }
+
+  return false;
 }
 
 function findMatchingDivEnd(html: string, startIndex: number): number {
@@ -747,7 +797,6 @@ export function updateDescriptionImages(
 
   // 3. eBay image hash / signature replacement:
   // ONLY matches img src that contain the specific eBay hash of an old product photo!
-  // This guarantees template icons, banner graphics, and layout images are 100% UNTOUCHED!
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];
     const oldHash = extractEbayImageHash(oldUrl);
@@ -757,8 +806,31 @@ export function updateDescriptionImages(
     updated = updated.replace(hashRegex, `$1${replacement}$3`);
   }
 
-  // 4. Template placeholders replacement
+  // 4. Sequential replacement of genuine product photos inside the template layout
+  // (Safely replaces Hero and Side photos while keeping IGI logo, trust icons, and banners 100% untouched)
+  const newSet = new Set(validNew);
+  let prodImgIndex = 0;
+  updated = updated.replace(/<img\b([^>]*?)src=(["'])([^"']+)\2([^>]*?)>/gi, (fullTag, beforeSrc, quote, srcUrl, afterSrc) => {
+    // If it's already one of the new images, keep it and advance index if matching current
+    if (newSet.has(srcUrl)) {
+      if (srcUrl === validNew[prodImgIndex]) {
+        prodImgIndex++;
+      }
+      return fullTag;
+    }
+    // If it's decorative (IGI badge, shipping/service icons, banner graphics, small icons <= 80px), NEVER touch it!
+    if (isDecorativeOrTemplateImage(srcUrl, fullTag)) {
+      return fullTag;
+    }
+    // It's a genuine product photo in the template (Hero, Side angle 1, Side angle 2, etc.)!
+    const replacement = validNew[prodImgIndex] || validNew[validNew.length - 1];
+    prodImgIndex++;
+    return `<img${beforeSrc}src=${quote}${replacement}${quote}${afterSrc}>`;
+  });
+
+  // 5. Template placeholders replacement
   updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, validNew[0]);
+  updated = updated.replace(/\{\{\s*(dynamic_gallery|images_gallery)\s*\}\}/gi, generateRadioGalleryHtml(validNew));
   for (let i = 1; i <= 12; i++) {
     const rep = validNew[i - 1] || validNew[0];
     updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), rep);

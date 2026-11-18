@@ -2,6 +2,7 @@ import { getStore, saveStore, saveStoreAsync } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, EbayMessage } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
 import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml, deduplicateImageUrls, isJunkMessageOrCss } from './template-engine';
+import { extractGoogleDriveId } from './google-drive-scanner';
 import fs from 'fs';
 import path from 'path';
 
@@ -595,14 +596,35 @@ export async function uploadVideoToEbayMediaApi(
       // Handle relative local upload paths (e.g. /uploads/videos/xyz.mp4)
       if (cleanUrl.startsWith('/uploads/')) {
         const localPath = path.join(process.cwd(), 'public', cleanUrl);
+        const tmpPath = path.join('/tmp', cleanUrl);
+        const tmpVideosPath = path.join('/tmp', 'uploads', 'videos', path.basename(cleanUrl));
+        const tmpUploadsPath = path.join('/tmp', 'uploads', path.basename(cleanUrl));
+
         if (fs.existsSync(localPath)) {
           videoBuffer = fs.readFileSync(localPath);
+        } else if (fs.existsSync(tmpVideosPath)) {
+          videoBuffer = fs.readFileSync(tmpVideosPath);
+        } else if (fs.existsSync(tmpUploadsPath)) {
+          videoBuffer = fs.readFileSync(tmpUploadsPath);
+        } else if (fs.existsSync(tmpPath)) {
+          videoBuffer = fs.readFileSync(tmpPath);
         } else {
           return { success: false, error: 'Local video file not found on disk' };
         }
       } else {
         // Fetch remote video stream (Google Drive, Cloud Storage, etc.)
-        const fetchRes = await fetch(cleanUrl, {
+        const gDriveId = extractGoogleDriveId(cleanUrl).id;
+        const gApiKey = store.masterConfig.googleDriveApiKey || process.env.GOOGLE_DRIVE_API_KEY;
+
+        let targetFetchUrl = cleanUrl;
+        if (gDriveId && gApiKey) {
+          // Direct API download stream bypasses all Google virus scan warning pages
+          targetFetchUrl = `https://www.googleapis.com/drive/v3/files/${gDriveId}?alt=media&key=${gApiKey}`;
+        } else if (gDriveId) {
+          targetFetchUrl = `https://drive.google.com/uc?export=download&id=${gDriveId}&confirm=t`;
+        }
+
+        const fetchRes = await fetch(targetFetchUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           },
@@ -610,15 +632,36 @@ export async function uploadVideoToEbayMediaApi(
         if (!fetchRes.ok) {
           return { success: false, error: `Failed to download video from URL (HTTP ${fetchRes.status})` };
         }
-        const arrayBuf = await fetchRes.arrayBuffer();
-        videoBuffer = Buffer.from(arrayBuf);
+
+        let arrayBuf = await fetchRes.arrayBuffer();
+        let buf = Buffer.from(arrayBuf);
+
+        // Check if Google Drive returned an HTML virus scan confirmation page
+        const headerSnippet = buf.slice(0, 200).toString('utf8').toLowerCase();
+        if (gDriveId && (headerSnippet.includes('<!doctype') || headerSnippet.includes('<html'))) {
+          const htmlText = buf.toString('utf8');
+          const confirmMatch = htmlText.match(/confirm=([a-zA-Z0-9_-]+)/i) || htmlText.match(/name="confirm"\s+value="([^"]+)"/i);
+          if (confirmMatch) {
+            const confirmedUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${gDriveId}`;
+            const confRes = await fetch(confirmedUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            });
+            if (confRes.ok) {
+              buf = Buffer.from(await confRes.arrayBuffer());
+            }
+          }
+        }
+
+        videoBuffer = buf;
       }
     } else {
       videoBuffer = videoInput;
     }
 
-    if (!videoBuffer || videoBuffer.length === 0) {
-      return { success: false, error: 'Video buffer is empty' };
+    if (!videoBuffer || videoBuffer.length < 500) {
+      return { success: false, error: 'Video buffer is empty or too small' };
     }
 
     const masterConfig = store.masterConfig;
@@ -646,16 +689,22 @@ export async function uploadVideoToEbayMediaApi(
       }),
     });
 
+    let videoId: string | undefined = undefined;
     const locationHeader = createRes.headers.get('location');
-    if (!locationHeader) {
+    if (locationHeader) {
+      videoId = locationHeader.split('/').pop()?.trim();
+    }
+    if (!videoId) {
+      try {
+        const createJson = await createRes.clone().json();
+        videoId = createJson.videoId || createJson.id;
+      } catch {}
+    }
+
+    if (!videoId) {
       const errText = await createRes.text();
       console.warn('[eBay Media API] createVideo failed:', createRes.status, errText);
       return { success: false, error: `eBay createVideo returned HTTP ${createRes.status}: ${errText.slice(0, 150)}` };
-    }
-
-    const videoId = locationHeader.split('/').pop();
-    if (!videoId) {
-      return { success: false, error: 'Could not extract videoId from eBay location header' };
     }
 
     console.log(`[eBay Media API] Uploading binary video content to eBay for videoId: ${videoId}`);
@@ -672,12 +721,12 @@ export async function uploadVideoToEbayMediaApi(
       body: new Uint8Array(videoBuffer),
     });
 
-    if (uploadRes.status === 200 || uploadRes.status === 204) {
-      console.log(`[eBay Media API] Successfully uploaded video to eBay! VideoID: ${videoId}`);
+    if (uploadRes.status >= 200 && uploadRes.status < 300) {
+      console.log(`[eBay Media API] Successfully uploaded video to eBay! VideoID: ${videoId} (Status ${uploadRes.status})`);
       return { success: true, videoId };
     } else {
       const errTxt = await uploadRes.text();
-      console.warn(`[eBay Media API] Video upload non-200 (HTTP ${uploadRes.status}):`, errTxt);
+      console.warn(`[eBay Media API] Video upload non-2xx (HTTP ${uploadRes.status}):`, errTxt);
       return { success: false, error: `eBay video upload returned HTTP ${uploadRes.status}: ${errTxt.slice(0, 150)}` };
     }
   } catch (err: any) {

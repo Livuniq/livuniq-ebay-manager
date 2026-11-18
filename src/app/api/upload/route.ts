@@ -169,31 +169,39 @@ export async function POST(request: Request) {
             }),
           });
 
+          let vidId: string | undefined = undefined;
           const locationHeader = createRes.headers.get('location');
           if (locationHeader) {
-            const vidId = locationHeader.split('/').pop();
-            if (vidId) {
-              console.log('Uploading binary video content to eBay Media API for VideoID:', vidId);
-              const uploadRes = await fetch(`${videoBaseUrl}/${vidId}/upload`, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${accessToken}`,
-                  'Content-Type': 'application/octet-stream',
-                  'Content-Length': activeBuffer.length.toString(),
-                  'Content-Range': `bytes 0-${activeBuffer.length - 1}/${activeBuffer.length}`,
-                },
-                body: activeBuffer,
-              });
+            vidId = locationHeader.split('/').pop()?.trim();
+          }
+          if (!vidId) {
+            try {
+              const cJson = await createRes.clone().json();
+              vidId = cJson.videoId || cJson.id;
+            } catch {}
+          }
 
-              if (uploadRes.status === 200 || uploadRes.status === 204) {
-                console.log('Successfully uploaded video binary to eBay! VideoID:', vidId);
-                videoId = vidId;
-              } else {
-                console.warn('eBay video upload status non-200:', uploadRes.status, await uploadRes.text());
-              }
+          if (vidId) {
+            console.log('Uploading binary video content to eBay Media API for VideoID:', vidId);
+            const uploadRes = await fetch(`${videoBaseUrl}/${vidId}/upload`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': activeBuffer.length.toString(),
+                'Content-Range': `bytes 0-${activeBuffer.length - 1}/${activeBuffer.length}`,
+              },
+              body: activeBuffer,
+            });
+
+            if (uploadRes.status >= 200 && uploadRes.status < 300) {
+              console.log('Successfully uploaded video binary to eBay! VideoID:', vidId, '(Status', uploadRes.status, ')');
+              videoId = vidId;
+            } else {
+              console.warn('eBay video upload status non-2xx:', uploadRes.status, await uploadRes.text());
             }
           } else {
-            console.warn('eBay createVideo returned no location header:', createRes.status, await createRes.text());
+            console.warn('eBay createVideo returned no location header or videoId:', createRes.status, await createRes.text());
           }
         } catch (vidErr) {
           console.error('eBay video upload error:', vidErr);
