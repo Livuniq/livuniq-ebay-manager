@@ -41,6 +41,59 @@ interface SkuImageGroup {
   selected: boolean;
 }
 
+// Client-side image optimizer to keep uploads lightweight (max 1600px, JPEG 0.85)
+async function optimizeImageForUpload(file: File, maxDim = 1600, quality = 0.85): Promise<File> {
+  // If file is already small (e.g. <= 350KB), return as is
+  if (file.size <= 350 * 1024) return file;
+
+  return new Promise((resolve) => {
+    try {
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob || blob.size >= file.size) {
+              resolve(file);
+            } else {
+              resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' }));
+            }
+          },
+          'image/jpeg',
+          quality
+        );
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        resolve(file);
+      };
+      img.src = objUrl;
+    } catch {
+      resolve(file);
+    }
+  });
+}
+
 export default function BulkImageUpdateModal({
   isOpen,
   onClose,
@@ -55,6 +108,7 @@ export default function BulkImageUpdateModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [pushLiveToEbay, setPushLiveToEbay] = useState(true);
   const [applyingUpdates, setApplyingUpdates] = useState(false);
+  const [updatingProgress, setUpdatingProgress] = useState({ current: 0, total: 0, sku: '' });
   const [errorMsg, setErrorMsg] = useState('');
   const [updateResults, setUpdateResults] = useState<any[]>([]);
   const [selectedPreviewListing, setSelectedPreviewListing] = useState<SkuImageGroup | null>(null);
@@ -135,14 +189,19 @@ export default function BulkImageUpdateModal({
         const stagedFiles: Array<{ name: string; url: string; size?: number }> = [];
 
         for (const fItem of item.files) {
-          const file = fItem.file;
+          const rawFile = fItem.file;
+          // Auto optimize photo to <= 1600px crisp JPEG to keep upload fast & lightweight
+          const file = await optimizeImageForUpload(rawFile);
           let fileUrl = '';
 
-          // Attempt fast server upload
+          // Attempt fast server upload with accountId for direct eBay EPS integration
           try {
             const formData = new FormData();
             formData.append('files', file);
             formData.append('relativePaths', fItem.relPath);
+            if (activeAccount?.id) {
+              formData.append('accountId', activeAccount.id);
+            }
 
             const res = await fetch('/api/upload', {
               method: 'POST',
@@ -236,50 +295,59 @@ export default function BulkImageUpdateModal({
 
     setApplyingUpdates(true);
     setErrorMsg('');
+    setUpdatingProgress({ current: 0, total: selectedGroups.length, sku: '' });
 
     try {
-      const payloadUpdates = selectedGroups.map((g) => ({
-        listingId: g.matchedListing!.id,
-        sku: g.matchedListing!.sku,
-        images: g.files.map((f) => f.url),
-      }));
+      const allResults: any[] = [];
+      const updatedListingsMap = new Map<string, EbayListing>();
 
-      const res = await fetch('/api/ebay/listings/bulk-update-images', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accountId: activeAccount?.id,
-          pushLiveToEbay,
-          updates: payloadUpdates,
-        }),
-      });
+      // Update listings sequentially to safely prevent any 4.5 MB request body limit on Vercel
+      for (let i = 0; i < selectedGroups.length; i++) {
+        const g = selectedGroups[i];
+        setUpdatingProgress({ current: i + 1, total: selectedGroups.length, sku: g.sku });
 
-      const data = await res.json();
-      if (data.success) {
-        setUpdateResults(data.results || []);
+        const singleUpdate = {
+          listingId: g.matchedListing!.id,
+          sku: g.matchedListing!.sku,
+          images: g.files.map((f) => f.url),
+        };
 
-        // Optimistically update listings state in parent app
-        const updatedListingsMap = new Map<string, EbayListing>();
-        selectedGroups.forEach((g) => {
-          const existing = g.matchedListing!;
-          const newUrls = g.files.map((f) => f.url);
-          const updated: EbayListing = {
-            ...existing,
-            images: newUrls,
-            imageUrl: newUrls[0] || existing.imageUrl,
-            hasUnpublishedChanges: !pushLiveToEbay,
-            lastUpdated: new Date().toISOString(),
-          };
-          updatedListingsMap.set(updated.id, updated);
+        const res = await fetch('/api/ebay/listings/bulk-update-images', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accountId: activeAccount?.id,
+            pushLiveToEbay,
+            updates: [singleUpdate],
+          }),
         });
 
-        const updatedArray = Array.from(updatedListingsMap.values());
-        onImagesUpdated(updatedArray);
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Server returned HTTP ${res.status}: ${errText.slice(0, 150)}`);
+        }
 
-        setStep(3);
-      } else {
-        setErrorMsg(data.error || 'Failed to update images');
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          allResults.push(...data.results);
+        }
+
+        const existing = g.matchedListing!;
+        const newUrls = g.files.map((f) => f.url);
+        const updated: EbayListing = {
+          ...existing,
+          images: newUrls,
+          imageUrl: newUrls[0] || existing.imageUrl,
+          hasUnpublishedChanges: !pushLiveToEbay,
+          lastUpdated: new Date().toISOString(),
+        };
+        updatedListingsMap.set(updated.id, updated);
       }
+
+      setUpdateResults(allResults);
+      const updatedArray = Array.from(updatedListingsMap.values());
+      onImagesUpdated(updatedArray);
+      setStep(3);
     } catch (err: any) {
       setErrorMsg(`Error during update: ${err.message}`);
     } finally {
@@ -731,7 +799,11 @@ export default function BulkImageUpdateModal({
                 {applyingUpdates ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>Replacing Images & Syncing...</span>
+                    <span>
+                      {updatingProgress.total > 0
+                        ? `Updating ${updatingProgress.current} of ${updatingProgress.total} (SKU: ${updatingProgress.sku})...`
+                        : 'Replacing Images & Syncing...'}
+                    </span>
                   </>
                 ) : (
                   <>

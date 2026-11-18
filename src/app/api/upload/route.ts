@@ -3,12 +3,14 @@ import fs from 'fs';
 import path from 'path';
 import { getAccounts, getActiveAccountId, getMasterConfig } from '@/lib/ebay/server-store';
 import { processVideoForEbay } from '@/lib/video-processor';
+import { ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const files = formData.getAll('files') as File[];
     const relativePaths = formData.getAll('relativePaths') as string[];
+    const reqAccountId = (formData.get('accountId') as string) || getActiveAccountId();
 
     if (!files || files.length === 0) {
       return NextResponse.json(
@@ -18,7 +20,10 @@ export async function POST(request: Request) {
     }
 
     const accounts = getAccounts();
-    const account = accounts.find((a) => a.id === getActiveAccountId()) || accounts.find((a) => a.accessToken);
+    const account = accounts.find((a) => a.id === reqAccountId) || accounts.find((a) => a.accessToken);
+    if (account) {
+      await ensureFreshAccessToken(account);
+    }
     const accessToken = account?.accessToken;
 
     const isVercel = Boolean(
