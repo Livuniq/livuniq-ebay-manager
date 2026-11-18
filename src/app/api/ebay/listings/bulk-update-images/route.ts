@@ -15,6 +15,7 @@ export async function POST(request: Request) {
       images: string[];
       videoUrl?: string;
       videoId?: string;
+      updateDescription?: boolean;
     }> = body.updates || [];
 
     if (!Array.isArray(updates) || updates.length === 0) {
@@ -122,8 +123,10 @@ export async function POST(request: Request) {
         listing.videoId = update.videoId;
       }
 
-      // 1b. Update HTML Description so that the template (#gallBlock, carousels, and <img>) renders the new images!
-      if (listing.description) {
+      const shouldUpdateDesc = Boolean(update.updateDescription ?? body.updateDescription);
+
+      // 1b. Update HTML Description ONLY if explicitly requested by user (keeps custom templates 100% safe by default)
+      if (shouldUpdateDesc && listing.description) {
         listing.description = updateDescriptionImages(listing.description, validNewImages, oldImages);
       }
 
@@ -142,15 +145,26 @@ export async function POST(request: Request) {
 
       if (pushLiveToEbay && hasLiveEbayId && listing.ebayListingId) {
         try {
+          const revisePayload: {
+            images: string[];
+            videoUrl?: string;
+            videoId?: string;
+            description?: string;
+          } = {
+            images: validNewImages,
+            videoUrl: update.videoUrl || listing.videoUrl,
+            videoId: update.videoId || listing.videoId,
+          };
+
+          // Only send description to eBay if user opted to revise description
+          if (shouldUpdateDesc && listing.description) {
+            revisePayload.description = listing.description;
+          }
+
           const reviseRes = await reviseLiveEbayListing(
             account,
             listing.ebayListingId.replace(/^#/, '').trim(),
-            {
-              images: validNewImages,
-              videoUrl: update.videoUrl || listing.videoUrl,
-              videoId: update.videoId || listing.videoId,
-              description: listing.description,
-            }
+            revisePayload
           );
 
           if (reviseRes.success) {

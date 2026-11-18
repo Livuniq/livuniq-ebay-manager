@@ -120,6 +120,7 @@ export default function BulkImageUpdateModal({
   const [skuGroups, setSkuGroups] = useState<SkuImageGroup[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [pushLiveToEbay, setPushLiveToEbay] = useState(true);
+  const [updateHtmlDescription, setUpdateHtmlDescription] = useState(false);
   const [applyingUpdates, setApplyingUpdates] = useState(false);
   const [updatingProgress, setUpdatingProgress] = useState({ current: 0, total: 0, sku: '' });
   const [errorMsg, setErrorMsg] = useState('');
@@ -446,6 +447,7 @@ export default function BulkImageUpdateModal({
           images: cleanNewUrls,
           videoUrl: g.videoUrl,
           videoId: g.videoId,
+          updateDescription: updateHtmlDescription,
         };
 
         const res = await fetch('/api/ebay/listings/bulk-update-images', {
@@ -470,7 +472,9 @@ export default function BulkImageUpdateModal({
 
         const existing = g.matchedListing!;
         const serverResult = data.results && data.results[0];
-        const updatedDesc = serverResult?.description || updateDescriptionImages(existing.description, cleanNewUrls, existing.images);
+        const updatedDesc = updateHtmlDescription
+          ? (serverResult?.description || updateDescriptionImages(existing.description, cleanNewUrls, existing.images))
+          : existing.description;
         const updated: EbayListing = {
           ...existing,
           images: cleanNewUrls,
@@ -917,10 +921,29 @@ export default function BulkImageUpdateModal({
                 />
                 <label htmlFor="pushLiveToEbay" className="text-xs text-slate-700 cursor-pointer">
                   <span className="font-bold text-slate-900 block">
-                    Push updated images directly to live eBay store now (Recommended)
+                    Push updated images & video directly to live eBay store now (Recommended)
                   </span>
                   <span className="text-slate-500 text-[11px] block mt-0.5">
-                    Agar check rahega toh eBay par live listings ki photos turant eBay API se replace ho jayengi. Agar uncheck karenge toh dashboard me Local Draft ban kar rahega taaki aap pehle review kar sakein.
+                    Agar check rahega toh eBay par live listings ki 24 gallery photos aur video turant eBay API se replace ho jayengi.
+                  </span>
+                </label>
+              </div>
+
+              {/* Options Checkbox: Update HTML Description */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-start space-x-3">
+                <input
+                  type="checkbox"
+                  id="updateHtmlDescription"
+                  checked={updateHtmlDescription}
+                  onChange={(e) => setUpdateHtmlDescription(e.target.checked)}
+                  className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 mt-0.5 cursor-pointer"
+                />
+                <label htmlFor="updateHtmlDescription" className="text-xs text-slate-700 cursor-pointer">
+                  <span className="font-bold text-slate-900 block">
+                    Also update photos inside listing HTML description
+                  </span>
+                  <span className="text-slate-500 text-[11px] block mt-0.5">
+                    <strong>Default: Unchecked (Safe).</strong> Agar uncheck rakhenge, toh aapka custom luxury HTML layout, tables aur IGI badge 100% untouched aur safe rahenge — sirf eBay listing gallery photos aur video change hongi. Check tabhi karein jab aap HTML ke andar ki photos bhi replace karna chahte hon.
                   </span>
                 </label>
               </div>

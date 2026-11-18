@@ -748,7 +748,7 @@ function findMatchingDivEnd(html: string, startIndex: number): number {
   return -1;
 }
 
-// Update all images embedded in an HTML description (including #gallBlock, gallery grids, and <img> tags)
+// Update all images embedded in an HTML description cleanly without altering layout, tables, or icons
 export function updateDescriptionImages(
   description?: string | null,
   newImages: string[] = [],
@@ -758,30 +758,14 @@ export function updateDescriptionImages(
   let updated = description;
 
   // Clean up any accidentally appended bottom galleries from previous updates
-  updated = updated.replace(/<div style=["']margin:\s*25px\s*0;?["']>\s*(?:<style>[\s\S]*?<\/style>\s*)?<div[^>]*id=["']gallBlock["'][\s\S]*?<\/div>\s*<\/div>\s*<\/div>/gi, '');
-  updated = updated.replace(/<div style=["']margin:\s*25px\s*0;?["']>\s*<div[^>]*id=["']gallBlock["'][\s\S]*?<\/div>\s*<\/div>/gi, '');
+  updated = updated.replace(/<style[^>]*>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*<div[^>]*id=["']gallBlock["'][\s\S]*?<\/div>/gi, '');
+  updated = updated.replace(/<div style=["']margin:\s*25px\s*0;?["']>[\s\S]*?<\/div>/gi, '');
+  updated = updated.replace(/<div[^>]*id=["']gallBlock["']>[\s\S]*?<\/div>/gi, '');
 
   const validNew = deduplicateImageUrls(newImages);
   if (validNew.length === 0) return updated;
 
-  // 1. If the template ALREADY has #gallBlock, replace that specific gallery block cleanly
-  const gallBlockMatch = updated.match(/<div[^>]*id=["']gallBlock["'][^>]*>/i);
-  if (gallBlockMatch && gallBlockMatch.index !== undefined) {
-    const startIdx = gallBlockMatch.index;
-    const endIdx = findMatchingDivEnd(updated, startIdx);
-    if (endIdx !== -1) {
-      const newGallHtml = generateRadioGalleryHtml(validNew);
-      const beforeHtml = updated.slice(0, startIdx);
-      const styleMatch = beforeHtml.match(/<style[^>]*>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*$/i);
-      if (styleMatch && styleMatch.index !== undefined) {
-        updated = updated.slice(0, styleMatch.index) + newGallHtml + updated.slice(endIdx);
-      } else {
-        updated = updated.slice(0, startIdx) + newGallHtml + updated.slice(endIdx);
-      }
-    }
-  }
-
-  // 2. Direct exact and protocol-agnostic replacement of known old product photos
+  // 1. Direct exact and protocol-agnostic replacement of known old product photos
   const validOld = deduplicateImageUrls(oldImages);
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];
@@ -795,8 +779,9 @@ export function updateDescriptionImages(
     }
   }
 
-  // 3. eBay image hash / signature replacement:
+  // 2. eBay image hash / signature replacement:
   // ONLY matches img src that contain the specific eBay hash of an old product photo!
+  // This guarantees template icons, banner graphics, tables, and borders are 100% UNTOUCHED!
   for (let i = 0; i < validOld.length; i++) {
     const oldUrl = validOld[i];
     const oldHash = extractEbayImageHash(oldUrl);
@@ -806,31 +791,8 @@ export function updateDescriptionImages(
     updated = updated.replace(hashRegex, `$1${replacement}$3`);
   }
 
-  // 4. Sequential replacement of genuine product photos inside the template layout
-  // (Safely replaces Hero and Side photos while keeping IGI logo, trust icons, and banners 100% untouched)
-  const newSet = new Set(validNew);
-  let prodImgIndex = 0;
-  updated = updated.replace(/<img\b([^>]*?)src=(["'])([^"']+)\2([^>]*?)>/gi, (fullTag, beforeSrc, quote, srcUrl, afterSrc) => {
-    // If it's already one of the new images, keep it and advance index if matching current
-    if (newSet.has(srcUrl)) {
-      if (srcUrl === validNew[prodImgIndex]) {
-        prodImgIndex++;
-      }
-      return fullTag;
-    }
-    // If it's decorative (IGI badge, shipping/service icons, banner graphics, small icons <= 80px), NEVER touch it!
-    if (isDecorativeOrTemplateImage(srcUrl, fullTag)) {
-      return fullTag;
-    }
-    // It's a genuine product photo in the template (Hero, Side angle 1, Side angle 2, etc.)!
-    const replacement = validNew[prodImgIndex] || validNew[validNew.length - 1];
-    prodImgIndex++;
-    return `<img${beforeSrc}src=${quote}${replacement}${quote}${afterSrc}>`;
-  });
-
-  // 5. Template placeholders replacement
+  // 3. Template placeholders replacement
   updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, validNew[0]);
-  updated = updated.replace(/\{\{\s*(dynamic_gallery|images_gallery)\s*\}\}/gi, generateRadioGalleryHtml(validNew));
   for (let i = 1; i <= 12; i++) {
     const rep = validNew[i - 1] || validNew[0];
     updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), rep);
