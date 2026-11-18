@@ -172,7 +172,16 @@ export default function CreateListingModal({
         body: formData,
       });
 
-      const data = await res.json();
+      const resText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(resText);
+      } catch {
+        if (res.status === 413 || resText.includes('Request Entity Too Large') || resText.includes('Payload Too Large')) {
+          throw new Error('Listing payload size server limit se badi hai (Request Entity Too Large). Photos/Description size is too large.');
+        }
+        throw new Error(`Server returned error (${res.status}): ${resText.slice(0, 100)}`);
+      }
       if (data.success && data.files) {
         const photoUrls = data.files.filter((f: any) => f.type !== 'video' && !isVideoMedia(f.url)).map((f: any) => f.url);
         const videoFiles = data.files.filter((f: any) => f.type === 'video' || isVideoMedia(f.url));
@@ -199,18 +208,37 @@ export default function CreateListingModal({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    const file = files[0];
+    try {
+      const localBlobUrl = URL.createObjectURL(file);
+      setVideoUrl(localBlobUrl);
+    } catch {
+      // ignore
+    }
+
     setUploadingFiles(true);
     setErrorMessage('');
     try {
       const formData = new FormData();
-      formData.append('files', files[0]);
+      formData.append('files', file);
 
       const res = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       });
 
-      const data = await res.json();
+      const resText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(resText);
+      } catch {
+        if (res.status === 413 || resText.includes('Request Entity Too Large') || resText.includes('Payload Too Large')) {
+          setErrorMessage('Video size server limit se badi hai (Request Entity Too Large). Video preview me chal sakti hai, lekin server upload ke liye please 50MB se choti video chunein.');
+          return;
+        }
+        throw new Error(`Server returned error (${res.status}): ${resText.slice(0, 100)}`);
+      }
+
       if (data.success && data.files && data.files[0]) {
         setVideoUrl(data.files[0].url);
         if (data.files[0].videoId) setVideoId(data.files[0].videoId);
@@ -319,7 +347,16 @@ export default function CreateListingModal({
         }),
       });
 
-      const data = await res.json();
+      const resText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(resText);
+      } catch {
+        if (res.status === 413 || resText.includes('Request Entity Too Large') || resText.includes('Payload Too Large')) {
+          throw new Error('Listing payload size server limit se badi hai (Request Entity Too Large). Photos/Description size is too large.');
+        }
+        throw new Error(`Server returned error (${res.status}): ${resText.slice(0, 100)}`);
+      }
       if (data.success) {
         if (publishToEbay) {
           if (data.ebayLiveStatus === 'LIVE_CREATED') {
@@ -790,9 +827,19 @@ export default function CreateListingModal({
                   </div>
                 </div>
 
-                {videoUrl && (
+                {(videoUrl || videoId) && (
                   <div className="mt-3 pt-3 border-t border-slate-200 flex flex-col items-center">
-                    <video src={videoUrl} controls className="max-h-48 rounded-lg shadow-xs border border-slate-300" />
+                    {videoUrl ? (
+                      <video src={videoUrl} controls className="max-h-48 rounded-lg shadow-xs border border-slate-300" />
+                    ) : (
+                      <div className="flex items-center space-x-2 bg-purple-50 text-purple-900 px-4 py-3 rounded-lg border border-purple-200">
+                        <Video className="w-5 h-5 text-purple-600" />
+                        <div>
+                          <div className="font-bold text-xs">Video Connected on eBay</div>
+                          <div className="text-[10px] text-purple-700">Media ID: {videoId}</div>
+                        </div>
+                      </div>
+                    )}
                     {videoId && (
                       <span className="mt-2 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold border border-emerald-200">
                         ✓ Connected to eBay Media ID: {videoId}

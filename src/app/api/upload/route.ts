@@ -5,6 +5,8 @@ import { getAccounts, getActiveAccountId, getMasterConfig } from '@/lib/ebay/ser
 import { processVideoForEbay } from '@/lib/video-processor';
 import { ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 
+export const maxDuration = 120;
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();

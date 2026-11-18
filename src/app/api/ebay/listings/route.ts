@@ -15,6 +15,8 @@ import { reviseLiveEbayListing, addLiveEbayListing, endLiveEbayListing } from '@
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
 import { deduplicateImageUrls } from '@/lib/ebay/template-engine';
 
+export const maxDuration = 120;
+
 export async function GET(request: Request) {
   await ensureStoreAsync();
   const { searchParams } = new URL(request.url);

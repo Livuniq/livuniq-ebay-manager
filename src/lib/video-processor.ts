@@ -11,7 +11,7 @@ function getFfmpegPath(): string | null {
 
   for (const p of possiblePaths) {
     try {
-      if (fs.existsSync(p)) return p;
+      if (fs.existsSync(/*turbopackIgnore: true*/ p)) return p;
     } catch {
       // ignore
     }
@@ -53,7 +53,14 @@ export async function processVideoForEbay(
       ];
 
       console.log('Auto-processing video for eBay with ffmpeg at:', ffmpegPath);
+      let stderrOutput = '';
       const proc = spawn(/*turbopackIgnore: true*/ ffmpegPath, args);
+
+      if (proc.stderr) {
+        proc.stderr.on('data', (chunk) => {
+          stderrOutput += chunk.toString();
+        });
+      }
 
       proc.on('close', (code) => {
         if (code === 0 && fs.existsSync(outputPath)) {
@@ -61,7 +68,7 @@ export async function processVideoForEbay(
           console.log(`Video auto-processed successfully! New size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
           resolve({ success: true, outputPath, size: stats.size });
         } else {
-          console.warn('ffmpeg exited with code:', code, 'falling back to original');
+          console.warn('ffmpeg exited with code:', code, 'stderr:', stderrOutput.slice(-300), 'falling back to original');
           const origStats = fs.statSync(inputPath);
           resolve({ success: false, outputPath: inputPath, size: origStats.size, error: `ffmpeg exit code ${code}` });
         }
