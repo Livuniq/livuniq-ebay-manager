@@ -59,6 +59,7 @@ export async function GET(request: Request) {
         TOTAL_DIAMOND_PCS: 40,
         COST_USD: 849,
         SELLING_PRICE_USD: 1066.82,
+        HTML: 'Cluster ring',
       },
     ];
 

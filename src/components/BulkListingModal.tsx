@@ -88,6 +88,8 @@ interface ParsedListingRow {
   videoUrl?: string;
   categoryProfileId?: string;
   templateId?: string;
+  htmlTemplateName?: string;
+  isTemplateFound?: boolean;
   itemSpecifics: Record<string, string>;
   templateAttributes?: Record<string, string>;
   status: 'READY' | 'WARNING' | 'ERROR';
@@ -117,6 +119,7 @@ export interface ColumnMappingConfig {
   titleCol: string;
   conditionCol: string;
   tcwCol: string;
+  htmlTemplateCol?: string;
 }
 
 export interface AttributeMappingItem {
@@ -132,6 +135,7 @@ const DEFAULT_COLUMN_MAPPING: ColumnMappingConfig = {
   titleCol: '',
   conditionCol: '',
   tcwCol: 'AUTO_SUM',
+  htmlTemplateCol: 'HTML',
 };
 
 const DEFAULT_ATTRIBUTE_MAPPINGS: AttributeMappingItem[] = [
@@ -171,7 +175,45 @@ const DEFAULT_EXCEL_HEADERS: string[] = [
   'TOTAL_DIAMOND_PCS',
   'COST_USD',
   'SELLING_PRICE_USD',
+  'HTML',
 ];
+
+// Helper to match template name or ID from Excel column against HTML Template Master
+function findMatchingTemplate(nameOrId: string, templates: any[] = []): any | null {
+  if (!nameOrId || !nameOrId.trim()) return null;
+  const target = nameOrId.trim().toLowerCase();
+  const targetClean = target.replace(/[^a-z0-9]/g, '');
+
+  if (targetClean === 'nohtml' || targetClean === 'none') {
+    return null;
+  }
+
+  // 1. Direct ID match
+  const byId = templates.find((t) => t.id && t.id.toLowerCase() === target);
+  if (byId) return byId;
+
+  // 2. Exact name match (trimmed, case-insensitive)
+  const byName = templates.find((t) => t.name && t.name.trim().toLowerCase() === target);
+  if (byName) return byName;
+
+  // 3. Clean alphanumeric match (e.g. "cluster ring" matches "Cluster Ring" or "Cluster-Ring")
+  const byClean = templates.find((t) => {
+    if (!t.name) return false;
+    const tClean = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return tClean === targetClean;
+  });
+  if (byClean) return byClean;
+
+  // 4. Substring / Includes match (e.g. "Cluster Ring" matches "✨ Cluster Ring Template")
+  const bySub = templates.find((t) => {
+    if (!t.name) return false;
+    const tClean = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return tClean.includes(targetClean) || (targetClean.length >= 4 && targetClean.includes(tClean));
+  });
+  if (bySub) return bySub;
+
+  return null;
+}
 
 export default function BulkListingModal({
   isOpen,
@@ -230,6 +272,10 @@ export default function BulkListingModal({
             setSelectedTemplateId('tpl-1794598343866');
           } else {
             setSelectedTemplateId(d.templates[0].id);
+          }
+          if (rawJsonRows.length > 0) {
+            const rows = parseRowsWithMapping(rawJsonRows, columnMapping, attributeMappings);
+            setParsedRows(rows);
           }
         }
       })
@@ -540,6 +586,38 @@ export default function BulkListingModal({
         statusMessage = 'Price must be > 0';
       }
 
+      // HTML Template name extraction from Excel (column "HTML" or mapped column)
+      const templateColToUse = colMap.htmlTemplateCol || 'HTML';
+      const rawHtmlCol = row[templateColToUse] !== undefined
+        ? row[templateColToUse]
+        : (row['HTML'] ?? row['html'] ?? row['Html'] ?? row['HTML Template'] ?? row['Template'] ?? row['TEMPLATE']);
+
+      const specifiedTemplateName = (rawHtmlCol !== undefined && rawHtmlCol !== null) ? String(rawHtmlCol).trim() : '';
+
+      let assignedTemplateId: string | undefined = undefined;
+      let isTemplateFound = true;
+
+      if (specifiedTemplateName) {
+        if (specifiedTemplateName.toLowerCase() === 'no html' || specifiedTemplateName.toLowerCase() === 'none') {
+          assignedTemplateId = undefined;
+          isTemplateFound = false;
+        } else {
+          const matchedTpl = findMatchingTemplate(specifiedTemplateName, templateList);
+          if (matchedTpl) {
+            assignedTemplateId = matchedTpl.id;
+            isTemplateFound = true;
+          } else {
+            // User requirement: If specified template is not found in HTML Template Master, mark as not found (will output "no html")
+            assignedTemplateId = undefined;
+            isTemplateFound = false;
+          }
+        }
+      } else {
+        // Fallback to category profile or default selected template
+        assignedTemplateId = matchedProfile?.templateId || selectedTemplateId;
+        isTemplateFound = true;
+      }
+
       return {
         index: idx + 1,
         sku,
@@ -554,7 +632,9 @@ export default function BulkListingModal({
         imageNames: [],
         matchedImageUrls: [],
         categoryProfileId: matchedProfile?.id,
-        templateId: matchedProfile?.templateId || selectedTemplateId,
+        templateId: assignedTemplateId,
+        htmlTemplateName: specifiedTemplateName,
+        isTemplateFound,
         itemSpecifics: cleanItemSpecifics,
         templateAttributes,
         status,
@@ -635,6 +715,7 @@ export default function BulkListingModal({
           titleCol: headersList.find((h) => /^title$/i.test(h)) || '',
           conditionCol: headersList.find((h) => /^condition/i.test(h)) || '',
           tcwCol: 'AUTO_SUM',
+          htmlTemplateCol: headersList.find((h) => /^(html|template|html_?template|template_?name)$/i.test(h.trim())) || (headersList.includes('HTML') ? 'HTML' : ''),
         };
         setColumnMapping(autoColMap);
 
@@ -712,6 +793,7 @@ export default function BulkListingModal({
       titleCol: '',
       conditionCol: '',
       tcwCol: 'AUTO_SUM',
+      htmlTemplateCol: excelHeaders.find((h) => /^(html|template|html_?template|template_?name)$/i.test(h.trim())) || (excelHeaders.includes('HTML') ? 'HTML' : ''),
     };
     setColumnMapping(autoColMap);
     const autoAttrMap = DEFAULT_ATTRIBUTE_MAPPINGS.map((item) => {
@@ -1024,31 +1106,58 @@ export default function BulkListingModal({
     try {
       // Build items payload with category-specific compiled HTML templates
       const itemsPayload = parsedRows.map((row) => {
-        const rowTemplate =
-          (row.templateId ? templateList.find((t) => t.id === row.templateId) : null) ||
-          templateList.find((t) => t.id === selectedTemplateId) ||
-          templateList[0] ||
-          DEFAULT_TEMPLATES[0];
-
         const finalImages = (row.matchedImageUrls.length > 0
           ? row.matchedImageUrls
           : ['https://images.unsplash.com/photo-1605100804763-247f67b3557e?w=500&auto=format&fit=crop&q=60']
         ).filter((u) => !isVideoMedia(u));
 
-        const descriptionHtml = renderDescriptionTemplate(rowTemplate.html, {
-          title: row.title,
-          price: row.price,
-          sku: row.sku,
-          quantity: row.quantity,
-          category: row.categoryName,
-          condition: row.conditionId === '1000' ? 'NEW' : 'USED',
-          conditionDescription: row.sellerNotes,
-          images: finalImages,
-          videoUrl: row.videoUrl,
-          itemSpecifics: row.itemSpecifics,
-          templateAttributes: row.templateAttributes,
-          storeName: activeAccount?.storeName || 'Livuniq Fine Jewelry',
-        });
+        let descriptionHtml = '';
+
+        if (row.htmlTemplateName) {
+          // 1. User specified an HTML template name in the HTML column!
+          const matchedTpl = row.templateId ? templateList.find((t) => t.id === row.templateId) : null;
+          if (matchedTpl) {
+            descriptionHtml = renderDescriptionTemplate(matchedTpl.html, {
+              title: row.title,
+              price: row.price,
+              sku: row.sku,
+              quantity: row.quantity,
+              category: row.categoryName,
+              condition: row.conditionId === '1000' ? 'NEW' : 'USED',
+              conditionDescription: row.sellerNotes,
+              images: finalImages,
+              videoUrl: row.videoUrl,
+              itemSpecifics: row.itemSpecifics,
+              templateAttributes: row.templateAttributes,
+              storeName: activeAccount?.storeName || 'Livuniq Fine Jewelry',
+            });
+          } else {
+            // User requirement: "or agar wo template na mile to no html aana chahiye / agar na mile to description me no html likhdena"
+            descriptionHtml = 'no html';
+          }
+        } else {
+          // 2. No HTML template named in column: use profile template or default selected template
+          const rowTemplate =
+            (row.templateId ? templateList.find((t) => t.id === row.templateId) : null) ||
+            templateList.find((t) => t.id === selectedTemplateId) ||
+            templateList[0] ||
+            DEFAULT_TEMPLATES[0];
+
+          descriptionHtml = renderDescriptionTemplate(rowTemplate.html, {
+            title: row.title,
+            price: row.price,
+            sku: row.sku,
+            quantity: row.quantity,
+            category: row.categoryName,
+            condition: row.conditionId === '1000' ? 'NEW' : 'USED',
+            conditionDescription: row.sellerNotes,
+            images: finalImages,
+            videoUrl: row.videoUrl,
+            itemSpecifics: row.itemSpecifics,
+            templateAttributes: row.templateAttributes,
+            storeName: activeAccount?.storeName || 'Livuniq Fine Jewelry',
+          });
+        }
 
         return {
           sku: row.sku,
@@ -1619,6 +1728,29 @@ export default function BulkListingModal({
                               ))}
                             </select>
                           </div>
+
+                          {/* HTML Template Column */}
+                          <div className="bg-purple-50/60 p-3 rounded-xl border border-purple-200/80 space-y-1">
+                            <label className="text-[11px] font-bold text-purple-900 block flex items-center justify-between">
+                              <span>HTML Template Column</span>
+                              <span className="text-[9px] bg-purple-200/60 text-purple-800 px-1.5 py-0.5 rounded font-bold font-mono">Dynamic HTML</span>
+                            </label>
+                            <select
+                              value={columnMapping.htmlTemplateCol || ''}
+                              onChange={(e) => handleUpdateColMapping('htmlTemplateCol', e.target.value)}
+                              className="w-full px-2.5 py-1.5 border border-purple-300 rounded-lg text-xs bg-white text-slate-900 font-semibold focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                            >
+                              <option value="">None (Use Step 3 Default Template)</option>
+                              {excelHeaders.map((h) => (
+                                <option key={h} value={h}>
+                                  Use column: {h} {/^(html|template)/i.test(h) ? '(Auto-Detected)' : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-purple-700 block font-mono truncate" title="If template name in Excel not found in Master, description will be set to 'no html'">
+                              Sample: {columnMapping.htmlTemplateCol ? String(rawJsonRows[0]?.[columnMapping.htmlTemplateCol] || 'Empty') : 'Disabled'}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -1855,11 +1987,30 @@ export default function BulkListingModal({
                           <span className="text-[10px] text-slate-400 font-mono block">
                             ID: {row.categoryId}
                           </span>
-                          {row.templateId && (
-                            <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded font-medium inline-block mt-0.5 truncate max-w-[150px]" title={`Assigned Template: ${templateList.find((t) => t.id === row.templateId)?.name || row.templateId}`}>
-                              Tpl: {templateList.find((t) => t.id === row.templateId)?.name || 'Category'}
+                          {row.htmlTemplateName ? (
+                            row.isTemplateFound ? (
+                              <span
+                                className="text-[9px] text-purple-700 bg-purple-50 border border-purple-200 px-1 py-0.5 rounded font-bold inline-block mt-0.5 truncate max-w-[150px]"
+                                title={`Template matched from Excel: "${row.htmlTemplateName}"`}
+                              >
+                                HTML: {templateList.find((t) => t.id === row.templateId)?.name || row.htmlTemplateName}
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[9px] text-amber-800 bg-amber-50 border border-amber-300 px-1 py-0.5 rounded font-bold inline-block mt-0.5 truncate max-w-[150px]"
+                                title={`Template "${row.htmlTemplateName}" not found in HTML Template Master! Description will be set to 'no html'`}
+                              >
+                                HTML: &quot;{row.htmlTemplateName}&quot; (Not Found ➔ no html)
+                              </span>
+                            )
+                          ) : row.templateId ? (
+                            <span
+                              className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded font-medium inline-block mt-0.5 truncate max-w-[150px]"
+                              title={`Assigned Default Template: ${templateList.find((t) => t.id === row.templateId)?.name || row.templateId}`}
+                            >
+                              Tpl: {templateList.find((t) => t.id === row.templateId)?.name || 'Default'}
                             </span>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     ))}
@@ -1912,6 +2063,9 @@ export default function BulkListingModal({
                     </option>
                   ))}
                 </select>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  💡 <strong>Per-Item HTML Template:</strong> Agar aapke Excel me <code>HTML</code> column hai aur usme kisi template ka naam likha hai (jaise: <em>Cluster ring</em>), toh us listing par automatic wahi template apply hoga. Agar wo template Master me nahi mila toh description me <code>no html</code> likh diya jayega. Jin rows me HTML column blank hoga, unpar yeh upar chuna hua default template apply hoga.
+                </p>
               </div>
 
               {/* Policies Selector */}
