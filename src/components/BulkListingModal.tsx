@@ -178,8 +178,17 @@ const DEFAULT_EXCEL_HEADERS: string[] = [
   'HTML',
 ];
 
-// Helper to match template name or ID from Excel column against HTML Template Master
-function findMatchingTemplate(nameOrId: string, templates: any[] = []): any | null {
+// Helper to match template name or ID from Excel column against HTML Template Master scoped to item's category
+function findMatchingTemplateForCategory(
+  nameOrId: string,
+  categoryInfo: {
+    profileId?: string;
+    profileName?: string;
+    categoryName?: string;
+    categoryProfiles?: MasterCategoryProfile[];
+  },
+  templates: any[] = []
+): any | null {
   if (!nameOrId || !nameOrId.trim()) return null;
   const target = nameOrId.trim().toLowerCase();
   const targetClean = target.replace(/[^a-z0-9]/g, '');
@@ -188,30 +197,119 @@ function findMatchingTemplate(nameOrId: string, templates: any[] = []): any | nu
     return null;
   }
 
-  // 1. Direct ID match
-  const byId = templates.find((t) => t.id && t.id.toLowerCase() === target);
-  if (byId) return byId;
+  const profId = (categoryInfo.profileId || '').toLowerCase().trim();
+  const profName = (categoryInfo.profileName || '').toLowerCase().trim();
+  const catName = (categoryInfo.categoryName || '').toLowerCase().trim();
 
-  // 2. Exact name match (trimmed, case-insensitive)
-  const byName = templates.find((t) => t.name && t.name.trim().toLowerCase() === target);
-  if (byName) return byName;
+  const cleanKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const profNameClean = cleanKey(profName);
+  const catNameClean = cleanKey(catName);
 
-  // 3. Clean alphanumeric match (e.g. "cluster ring" matches "Cluster Ring" or "Cluster-Ring")
-  const byClean = templates.find((t) => {
-    if (!t.name) return false;
-    const tClean = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return tClean === targetClean;
+  // Helper: check if a category name/id matches the target category
+  const matchesCategory = (categoryCandidate: string): boolean => {
+    if (!categoryCandidate) return false;
+    const candLower = categoryCandidate.toLowerCase().trim();
+    const candClean = cleanKey(candLower);
+
+    if (profId && candLower === profId) return true;
+    if (profNameClean) {
+      if (candClean === profNameClean) return true;
+      if (candClean === profNameClean + 's' || profNameClean === candClean + 's') return true;
+      if (candClean.includes(profNameClean) || profNameClean.includes(candClean)) return true;
+    }
+    if (catNameClean) {
+      if (candClean === catNameClean) return true;
+      if (candClean === catNameClean + 's' || catNameClean === candClean + 's') return true;
+      if (candClean.includes(catNameClean) || catNameClean.includes(candClean)) return true;
+    }
+    return false;
+  };
+
+  // Helper: does a template belong to this row's category?
+  const isTemplateForCategory = (tpl: any): boolean => {
+    if (!tpl) return false;
+
+    // 1. Direct mappedCategories on the template
+    if (tpl.mappedCategories && Array.isArray(tpl.mappedCategories) && tpl.mappedCategories.length > 0) {
+      const isDirect = tpl.mappedCategories.some((mc: string) => matchesCategory(mc));
+      if (isDirect) return true;
+    }
+
+    // 2. Assigned in categoryProfiles (where profile.templateId === tpl.id)
+    if (categoryInfo.categoryProfiles && Array.isArray(categoryInfo.categoryProfiles)) {
+      const isProfileAssigned = categoryInfo.categoryProfiles.some((p) => {
+        if (p.templateId !== tpl.id) return false;
+        return matchesCategory(p.id) || matchesCategory(p.name);
+      });
+      if (isProfileAssigned) return true;
+    }
+
+    return false;
+  };
+
+  // Helper to match template name/id
+  const matchesTemplateName = (tpl: any): boolean => {
+    if (!tpl) return false;
+    // 1. Direct ID match
+    if (tpl.id && tpl.id.toLowerCase() === target) return true;
+
+    // 2. Exact Name match (case-insensitive)
+    const tplName = (tpl.name || '').trim().toLowerCase();
+    if (tplName === target) return true;
+
+    // 3. Clean alphanumeric match (e.g. "no accent" vs "No Accents")
+    const tplClean = cleanKey(tplName);
+    if (tplClean === targetClean) return true;
+    if (tplClean === targetClean + 's' || targetClean === tplClean + 's') return true;
+
+    // 4. Substring / Includes match
+    if (tplClean.includes(targetClean) || (targetClean.length >= 4 && targetClean.includes(tplClean))) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // PRIORITY 1: Scoped to THIS category (User requirement: "Engagement Ring ke under no accent wala html use kare")
+  const categoryTemplates = templates.filter(isTemplateForCategory);
+  if (categoryTemplates.length > 0) {
+    // 1a. Direct ID
+    const byId = categoryTemplates.find((t) => t.id && t.id.toLowerCase() === target);
+    if (byId) return byId;
+
+    // 1b. Exact Name
+    const byExact = categoryTemplates.find((t) => t.name && t.name.trim().toLowerCase() === target);
+    if (byExact) return byExact;
+
+    // 1c. Clean alphanumeric match (e.g. "no accent" vs "No Accents")
+    const byClean = categoryTemplates.find((t) => {
+      const tc = cleanKey(t.name || '');
+      return tc === targetClean || tc === targetClean + 's' || targetClean === tc + 's';
+    });
+    if (byClean) return byClean;
+
+    // 1d. Substring match
+    const bySub = categoryTemplates.find((t) => {
+      const tc = cleanKey(t.name || '');
+      return tc.includes(targetClean) || (targetClean.length >= 4 && targetClean.includes(tc));
+    });
+    if (bySub) return bySub;
+  }
+
+  // PRIORITY 2: Templates that have NO specific category mapped (unassigned / generic templates)
+  const unassignedTemplates = templates.filter((t) => {
+    const hasMappedCats = t.mappedCategories && Array.isArray(t.mappedCategories) && t.mappedCategories.length > 0;
+    const isProfileDefault = categoryInfo.categoryProfiles?.some((p) => p.templateId === t.id);
+    return !hasMappedCats && !isProfileDefault;
   });
-  if (byClean) return byClean;
 
-  // 4. Substring / Includes match (e.g. "Cluster Ring" matches "✨ Cluster Ring Template")
-  const bySub = templates.find((t) => {
-    if (!t.name) return false;
-    const tClean = t.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-    return tClean.includes(targetClean) || (targetClean.length >= 4 && targetClean.includes(tClean));
-  });
-  if (bySub) return bySub;
+  if (unassignedTemplates.length > 0) {
+    const genericMatch = unassignedTemplates.find(matchesTemplateName);
+    if (genericMatch) return genericMatch;
+  }
 
+  // If not found in category-scoped templates or generic templates, return null!
+  // (Will output "no html" as requested by user)
   return null;
 }
 
@@ -602,12 +700,21 @@ export default function BulkListingModal({
           assignedTemplateId = undefined;
           isTemplateFound = false;
         } else {
-          const matchedTpl = findMatchingTemplate(specifiedTemplateName, templateList);
+          const matchedTpl = findMatchingTemplateForCategory(
+            specifiedTemplateName,
+            {
+              profileId: matchedProfile?.id,
+              profileName: matchedProfile?.name || productType,
+              categoryName: categoryName || productType,
+              categoryProfiles,
+            },
+            templateList
+          );
           if (matchedTpl) {
             assignedTemplateId = matchedTpl.id;
             isTemplateFound = true;
           } else {
-            // User requirement: If specified template is not found in HTML Template Master, mark as not found (will output "no html")
+            // User requirement: If specified template is not found in HTML Template Master for this category, mark as not found (will output "no html")
             assignedTemplateId = undefined;
             isTemplateFound = false;
           }
@@ -1991,14 +2098,14 @@ export default function BulkListingModal({
                             row.isTemplateFound ? (
                               <span
                                 className="text-[9px] text-purple-700 bg-purple-50 border border-purple-200 px-1 py-0.5 rounded font-bold inline-block mt-0.5 truncate max-w-[150px]"
-                                title={`Template matched from Excel: "${row.htmlTemplateName}"`}
+                                title={`Category-scoped template: "${templateList.find((t) => t.id === row.templateId)?.name || row.htmlTemplateName}" under ${row.categoryName || 'Category'}`}
                               >
                                 HTML: {templateList.find((t) => t.id === row.templateId)?.name || row.htmlTemplateName}
                               </span>
                             ) : (
                               <span
                                 className="text-[9px] text-amber-800 bg-amber-50 border border-amber-300 px-1 py-0.5 rounded font-bold inline-block mt-0.5 truncate max-w-[150px]"
-                                title={`Template "${row.htmlTemplateName}" not found in HTML Template Master! Description will be set to 'no html'`}
+                                title={`Template "${row.htmlTemplateName}" not found under ${row.categoryName || 'Category'} in HTML Template Master! Description will be set to 'no html'`}
                               >
                                 HTML: &quot;{row.htmlTemplateName}&quot; (Not Found ➔ no html)
                               </span>

@@ -33,6 +33,7 @@ export interface DescriptionTemplate {
   isDefault?: boolean;
   html: string;
   createdAt: string;
+  mappedCategories?: string[];
 }
 
 // Generate styled HTML Table of all legitimate eBay item specifics

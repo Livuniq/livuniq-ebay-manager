@@ -454,6 +454,7 @@ export function saveTemplate(
     description: tpl.description || 'Custom HTML Template',
     html: tpl.html,
     createdAt: new Date().toISOString(),
+    mappedCategories: tpl.mappedCategories || [],
   };
 
   targetList.push(newTpl);

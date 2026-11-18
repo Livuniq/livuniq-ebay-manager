@@ -258,9 +258,11 @@ export default function MasterHtmlTemplates({
     setFormHtml(tpl.html);
 
     // Find which categories are assigned to this template
-    const mappedCats = categoryProfiles
-      .filter((p) => p.templateId === tpl.id)
-      .map((p) => p.id);
+    const mappedCats = (tpl.mappedCategories && tpl.mappedCategories.length > 0)
+      ? tpl.mappedCategories
+      : categoryProfiles
+          .filter((p) => p.templateId === tpl.id)
+          .map((p) => p.id);
     setFormMappedCategories(mappedCats);
 
     setEditorTab('split');
@@ -273,7 +275,12 @@ export default function MasterHtmlTemplates({
     setFormName(`${tpl.name} (Copy)`);
     setFormDescription(tpl.description || '');
     setFormHtml(tpl.html);
-    setFormMappedCategories([]);
+    const mappedCats = (tpl.mappedCategories && tpl.mappedCategories.length > 0)
+      ? tpl.mappedCategories
+      : categoryProfiles
+          .filter((p) => p.templateId === tpl.id)
+          .map((p) => p.id);
+    setFormMappedCategories(mappedCats);
     setEditorTab('split');
     setEditorOpen(true);
   };
@@ -319,6 +326,7 @@ export default function MasterHtmlTemplates({
         name: formName.trim(),
         description: formDescription.trim(),
         html: formHtml,
+        mappedCategories: formMappedCategories,
       };
       if (editingTemplateId) {
         payload.id = editingTemplateId;
@@ -425,8 +433,15 @@ export default function MasterHtmlTemplates({
   };
 
   // Helper: Get list of categories mapped to a template
-  const getCategoriesForTemplate = (tplId: string) => {
-    return categoryProfiles.filter((p) => p.templateId === tplId);
+  const getCategoriesForTemplate = (tpl: DescriptionTemplate) => {
+    if (tpl.mappedCategories && tpl.mappedCategories.length > 0) {
+      return categoryProfiles.filter((p) =>
+        tpl.mappedCategories!.includes(p.id) ||
+        tpl.mappedCategories!.includes(p.name) ||
+        p.templateId === tpl.id
+      );
+    }
+    return categoryProfiles.filter((p) => p.templateId === tpl.id);
   };
 
   return (
@@ -563,7 +578,7 @@ export default function MasterHtmlTemplates({
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {templates.map((tpl) => {
-              const mappedCats = getCategoriesForTemplate(tpl.id);
+              const mappedCats = getCategoriesForTemplate(tpl);
               return (
                 <div
                   key={tpl.id}
