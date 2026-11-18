@@ -124,6 +124,19 @@ export default function BulkImageUpdateModal({
   const [errorMsg, setErrorMsg] = useState('');
   const [updateResults, setUpdateResults] = useState<any[]>([]);
   const [selectedPreviewListing, setSelectedPreviewListing] = useState<SkuImageGroup | null>(null);
+  const [hasStoredApiKey, setHasStoredApiKey] = useState(false);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    fetch('/api/ebay/bulk/scan-gdrive')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.hasApiKey) {
+          setHasStoredApiKey(true);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   const folderInputRef = useRef<HTMLInputElement>(null);
 
@@ -645,21 +658,47 @@ export default function BulkImageUpdateModal({
                       </p>
                     </div>
 
-                    {/* Google API Key (Optional / Expandable) */}
+                    {/* Google API Key Status / Input */}
                     <div>
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                        className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>{showApiKeyInput ? '− Hide' : '+ Enter'} Google Cloud API Key (Optional - for high-volume folders)</span>
-                      </button>
+                      {hasStoredApiKey ? (
+                        <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                          <div className="flex items-center space-x-2 text-xs text-emerald-800 font-semibold">
+                            <CheckCircle className="w-4 h-4 text-emerald-600" />
+                            <span>Google Drive API Key is active and saved!</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                            className="text-[11px] text-emerald-700 hover:text-emerald-900 underline font-medium cursor-pointer"
+                          >
+                            Change Key
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                          className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{showApiKeyInput ? '− Hide' : '+ Enter'} Google Cloud API Key (Required for scanning Drive folders)</span>
+                        </button>
+                      )}
 
                       {showApiKeyInput && (
-                        <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 animate-in fade-in">
-                          <label className="block text-[11px] font-bold text-slate-700">
-                            Google Drive API Key (Free from Google Cloud Console)
-                          </label>
+                        <div className="mt-2 p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 animate-in fade-in">
+                          <div className="flex items-center justify-between">
+                            <label className="block text-[11px] font-bold text-slate-700">
+                              Google Drive API Key (100% Free - No Billing Required)
+                            </label>
+                            <a
+                              href="https://console.cloud.google.com/apis/credentials"
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] text-indigo-600 hover:underline flex items-center gap-1 font-semibold"
+                            >
+                              Get Free Key <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          </div>
                           <input
                             type="text"
                             value={gdriveApiKey}
@@ -667,18 +706,26 @@ export default function BulkImageUpdateModal({
                             placeholder="AIzaSy..."
                             className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                           />
-                          <p className="text-[10px] text-slate-500">
-                            Folder ke andar 1000+ files ko list karne ke liye Google Drive API key use hoti hai.
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Google Cloud Console me <strong>"Google Drive API"</strong> enable karein ➔ <strong>Credentials ➔ Create API Key</strong> par click karke yahan paste karein. Ye ek bar save hone ke baad hamesha auto-use hogi.
                           </p>
                         </div>
                       )}
+                    </div>
+
+                    {/* Quick Switch to Local Folder Advice */}
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-start space-x-2">
+                      <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold">Bina API Key ke Fast Alternative:</span> Agar aapke paas API key nahi hai, to upar pehla tab <strong>"From Computer Folder"</strong> chuniye. Usme bina kisi Google setup ke 1 second me matching aur live sync ho jata hai!
+                      </div>
                     </div>
 
                     {/* Alternative: Raw List of Links */}
                     <div className="pt-2 border-t border-slate-100">
                       <details className="group">
                         <summary className="text-[11px] font-semibold text-slate-600 group-hover:text-slate-800 cursor-pointer list-none flex items-center justify-between">
-                          <span>Ya direct SKU-wise Google Drive Links paste karein (Manual List)</span>
+                          <span>Ya direct SKU-wise Google Drive File Links paste karein (Manual List)</span>
                           <span className="text-slate-400 group-open:rotate-180 transition">▼</span>
                         </summary>
                         <div className="mt-2.5 space-y-1.5">
@@ -686,11 +733,11 @@ export default function BulkImageUpdateModal({
                             rows={3}
                             value={gdriveRawList}
                             onChange={(e) => setGdriveRawList(e.target.value)}
-                            placeholder={'SLR03042: https://drive.google.com/file/d/..., https://...\nSLR02845: https://drive.google.com/file/d/...'}
+                            placeholder={'SLR03042: https://drive.google.com/file/d/1abc..., https://drive.google.com/file/d/2xyz...\nSLR02845: https://drive.google.com/file/d/3def...'}
                             className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:bg-white focus:outline-none"
                           />
                           <p className="text-[10px] text-slate-500">
-                            Format: <code>SKU: &lt;link1&gt;, &lt;link2&gt;</code> (har nayi line par naya SKU).
+                            Format: <code>SKU: &lt;photo link 1&gt;, &lt;video link&gt;</code> (har nayi line par naya SKU).
                           </p>
                         </div>
                       </details>

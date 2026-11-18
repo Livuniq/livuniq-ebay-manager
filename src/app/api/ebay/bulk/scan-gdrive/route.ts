@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStore, ensureStoreAsync, getActiveAccountId } from '@/lib/ebay/server-store';
+import { getStore, ensureStoreAsync, getActiveAccountId, saveStoreAsync } from '@/lib/ebay/server-store';
 import {
   extractGoogleDriveId,
   scanGoogleDriveViaApi,
@@ -23,6 +23,12 @@ export async function POST(request: Request) {
       store.masterConfig.googleDriveApiKey ||
       '';
 
+    // Auto-persist valid API key to store masterConfig so user never has to re-enter it
+    if ((body.apiKey || '').trim() && store.masterConfig.googleDriveApiKey !== (body.apiKey || '').trim()) {
+      store.masterConfig.googleDriveApiKey = (body.apiKey || '').trim();
+      await saveStoreAsync(store);
+    }
+
     let detectedGroups: DriveSkuGroup[] = [];
     let scanError = '';
 
@@ -40,15 +46,19 @@ export async function POST(request: Request) {
         return NextResponse.json({
           success: false,
           needsApiKey: true,
-          error: 'Google Drive folder scan ke liye Google API Key zaroori hai (Google Cloud Console se free milti hai), ya aap niche direct Drive links paste kar sakte hain.',
+          error: 'Google Drive folder scan ke liye Google API Key zaroori hai (Google Cloud Console se free milti hai). Kripya niche "+ Enter Google Cloud API Key" me apni key dalein, ya Computer Folder option use karein.',
         });
       }
 
       const scanResult = await scanGoogleDriveViaApi(folderId, apiKey);
       if (!scanResult.success) {
+        let userFriendlyError = scanResult.error || 'Google Drive folder scan failed.';
+        if (userFriendlyError.includes('404') || userFriendlyError.toLowerCase().includes('not found')) {
+          userFriendlyError = `Google Drive folder access nahi ho pa raha (404 Not Found). Kripya Google Drive me folder par Right Click ➔ Share ➔ 'Anyone with the link' (Viewer) select karein.`;
+        }
         return NextResponse.json({
           success: false,
-          error: scanResult.error || 'Google Drive folder scan failed.',
+          error: userFriendlyError,
         });
       }
 
@@ -107,4 +117,14 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+export async function GET() {
+  await ensureStoreAsync();
+  const store = getStore();
+  const apiKey = process.env.GOOGLE_DRIVE_API_KEY || store.masterConfig.googleDriveApiKey || '';
+  return NextResponse.json({
+    hasApiKey: Boolean(apiKey),
+    configured: Boolean(apiKey),
+  });
 }
