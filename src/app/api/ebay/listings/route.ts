@@ -388,20 +388,20 @@ export async function DELETE(request: Request) {
     const account = accounts.find((a) => a.id === accountId) || accounts[0];
 
     if (all) {
-      const scope = searchParams.get('scope') || 'all';
-      const targetAccId = searchParams.get('accountId');
+      // User rule: Removal must ALWAYS be strictly scoped to the active store only
+      const targetAccId = searchParams.get('accountId') || accountId;
+      const targetAccount = accounts.find((a) => a.id === targetAccId) || account;
       
-      // If scope is 'all', target all listings across all accounts. If 'current', filter by targetAccId.
-      const listingsToRemove = (scope === 'current' && targetAccId)
+      const listingsToRemove = targetAccId
         ? getListings(targetAccId)
-        : getListings();
+        : getListings(accountId);
 
       const endedResults: { itemId?: string; success: boolean; message: string }[] = [];
 
       if (endOnEbay) {
         for (const l of listingsToRemove) {
           if (l.ebayListingId) {
-            const acc = accounts.find((a) => a.id === l.accountId) || account;
+            const acc = accounts.find((a) => a.id === l.accountId) || targetAccount;
             if (acc) {
               const endRes = await endLiveEbayListing(acc, l.ebayListingId);
               endedResults.push({ itemId: l.ebayListingId, ...endRes });
@@ -410,14 +410,14 @@ export async function DELETE(request: Request) {
         }
       }
 
-      const clearedCount = clearAllListings(scope === 'current' && targetAccId ? targetAccId : undefined);
+      const clearedCount = clearAllListings(targetAccId || accountId);
       await saveStoreAsync(getStore());
       return NextResponse.json({
         success: true,
         clearedCount,
         endedOnEbayCount: endedResults.filter((r) => r.success).length,
         endedResults,
-        message: `Successfully removed ${clearedCount} listings from Dashboard${endedResults.length > 0 ? ` and ended ${endedResults.filter(r => r.success).length} on live eBay` : ''}!`,
+        message: `Successfully removed ${clearedCount} listings from store "${targetAccount?.storeName || targetAccount?.ebayUsername || 'Active Store'}"${endedResults.length > 0 ? ` and ended ${endedResults.filter(r => r.success).length} on live eBay` : ''}!`,
       });
     }
 

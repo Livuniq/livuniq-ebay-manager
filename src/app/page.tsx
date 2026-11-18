@@ -137,7 +137,7 @@ export default function Home() {
   const [showClearAllModal, setShowClearAllModal] = useState(false);
   const [clearingListings, setClearingListings] = useState(false);
   const [clearEndOnEbay, setClearEndOnEbay] = useState(true);
-  const [clearScope, setClearScope] = useState<'all' | 'current'>('all');
+  const [clearScope, setClearScope] = useState<'current'>('current');
 
   // Reschedule Listing Modal State
   const [rescheduleModalItem, setRescheduleModalItem] = useState<EbayListing | null>(null);
@@ -412,24 +412,24 @@ export default function Home() {
     }
   };
 
-  // Clear/Remove all listings everywhere
+  // Clear/Remove all listings for active store only
   const handleClearAllListings = async () => {
+    if (!activeAccountId) {
+      alert('Koi active store select nahi hai!');
+      return;
+    }
     setClearingListings(true);
     try {
       const res = await fetch(
-        `/api/ebay/listings?all=true&scope=${clearScope}&accountId=${activeAccountId}&endOnEbay=${clearEndOnEbay}`,
+        `/api/ebay/listings?all=true&scope=current&accountId=${activeAccountId}&endOnEbay=${clearEndOnEbay}`,
         { method: 'DELETE' }
       );
       const data = await res.json();
       if (data.success) {
-        if (clearScope === 'all') {
-          setListings([]);
-        } else {
-          setListings((prev) => prev.filter((l) => l.accountId !== activeAccountId));
-        }
+        setListings((prev) => prev.filter((l) => l.accountId !== activeAccountId));
         setShowClearAllModal(false);
-        alert(data.message || 'All listings removed successfully from everywhere!');
-        await fetchAccountsAndData();
+        alert(data.message || `Store "${activeAccount?.storeName || 'Active Store'}" ke saare listings remove ho gaye!`);
+        await fetchAccountsAndData(activeAccountId);
       } else {
         alert(data.error || 'Failed to clear listings');
       }
@@ -1472,7 +1472,7 @@ export default function Home() {
                   <button
                     onClick={() => setShowClearAllModal(true)}
                     className="flex items-center space-x-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer"
-                    title="Remove all listings from everywhere (Dashboard and live eBay store)"
+                    title={`Remove all listings from active store (${activeAccount?.storeName || 'Active Store'})`}
                   >
                     <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                     <span>Remove All Listings</span>
@@ -2648,7 +2648,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* MODAL 5: REMOVE ALL LISTINGS EVERYWHERE */}
+      {/* MODAL 5: REMOVE ALL LISTINGS FOR ACTIVE STORE */}
       {showClearAllModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in duration-200 space-y-4">
@@ -2658,37 +2658,42 @@ export default function Home() {
               </span>
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  Remove All Listings Everywhere?
+                  Remove All Listings from Store?
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Permanent removal from Dashboard and eBay
+                  Sirf active store ke listings remove honge
                 </p>
               </div>
             </div>
 
             <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-800 leading-relaxed">
-              ⚠️ <strong>Warning:</strong> Ye action sare listings ko database aur eBay live store se permanently remove / end kar dega. Is action ko undo nahi kiya ja sakta.
+              ⚠️ <strong>Warning:</strong> Ye action sirf active store{' '}
+              <strong>({activeAccount?.storeName || activeAccount?.ebayUsername || 'Active Store'})</strong> ke listings
+              ko database aur eBay live store se permanently remove / end karega. Baki connected stores bilkul safe rahenge.
+            </div>
+
+            {/* Target Active Store Badge */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                Target Active Store:
+              </span>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-xs font-bold text-slate-900">
+                    {activeAccount?.storeName || activeAccount?.ebayUsername || 'Active Store'}
+                  </span>
+                  <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono">
+                    {activeAccount?.marketplace || 'EBAY_US'}
+                  </span>
+                </div>
+                <span className="text-xs font-bold text-rose-600">
+                  {listings.filter((l) => l.accountId === activeAccountId).length} listings
+                </span>
+              </div>
             </div>
 
             <div className="space-y-3 pt-1">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Scope of Removal:
-                </label>
-                <select
-                  value={clearScope}
-                  onChange={(e) => setClearScope(e.target.value as 'all' | 'current')}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 bg-white focus:ring-2 focus:ring-rose-500 cursor-pointer"
-                >
-                  <option value="all">
-                    🌍 Entire System (All Connected Stores & Accounts) - {listings.length} listings
-                  </option>
-                  <option value="current">
-                    🏪 Current Store Only ({activeAccount?.storeName || 'Active Store'})
-                  </option>
-                </select>
-              </div>
-
               <label className="flex items-start gap-2 text-xs font-medium text-slate-700 cursor-pointer bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                 <input
                   type="checkbox"
@@ -2723,12 +2728,12 @@ export default function Home() {
                 {clearingListings ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Removing Everything...</span>
+                    <span>Removing Listings...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Yes, Remove All Everywhere</span>
+                    <span>Yes, Remove All ({listings.filter((l) => l.accountId === activeAccountId).length})</span>
                   </>
                 )}
               </button>
