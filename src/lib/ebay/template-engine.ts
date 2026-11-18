@@ -124,6 +124,22 @@ export function generateRadioGalleryHtml(images: string[] = []): string {
 ${activeSelectors} { display: block !important; }
 #gallBlock .imgLgIn img { max-width: 100%; max-height: 480px; object-fit: contain; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
 
+/* Suppress any inherited ::before / ::after pseudo-elements (e.g. from .clearfix) so they never become empty ghost grid items in CSS Grid */
+#tmpShell #gallBlock #gallThumbs::before,
+#tmpShell #gallBlock #gallThumbs::after,
+#gallBlock #gallThumbs::before,
+#gallBlock #gallThumbs::after,
+#gallThumbs::before,
+#gallThumbs::after {
+  content: none !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
 /* Clean 5-per-row grid layout that flawlessly wraps 6-12 images into neat rows */
 #tmpShell #gallBlock #gallThumbs,
 #gallBlock #gallThumbs,
@@ -206,7 +222,7 @@ ${activeThumbSelectors} {
 ${radios}
 ${largeImages}
       <div class="clear"><br /></div>
-      <div class="clearfix gallThumbsGrid" id="gallThumbs">
+      <div class="gallThumbsGrid" id="gallThumbs">
 ${thumbs.join('\n')}
       </div>
     </div>`;
