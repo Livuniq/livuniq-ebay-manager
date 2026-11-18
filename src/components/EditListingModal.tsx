@@ -338,7 +338,7 @@ export default function EditListingModal({
         data = JSON.parse(resText);
       } catch {
         if (res.status === 413 || resText.includes('Request Entity Too Large') || resText.includes('Payload Too Large')) {
-          setErrorMessage('Video size server limit se badi hai (Request Entity Too Large). Video dashboard preview me ready hai, lekin server upload ke liye please 50MB se choti video chunein.');
+          setErrorMessage('Video size live server limit (4.5MB on Vercel) se badi hai. Dashboard me local preview ready hai! Live server ke liye please video ko localhost:3000 par upload karein (jahan 150MB support hai) ya niche direct Video URL / eBay Media ID paste karein.');
           return;
         }
         throw new Error(`Server returned error (${res.status}): ${resText.slice(0, 100)}`);
@@ -1008,6 +1008,39 @@ export default function EditListingModal({
                       <Video className="w-4 h-4" />
                       <span>{uploadingFiles ? 'Auto-Optimizing for eBay (1080p)...' : 'Upload Video'}</span>
                     </button>
+                  </div>
+                </div>
+
+                {/* Direct Video URL or eBay Media ID Inputs */}
+                <div className="mt-3 pt-3 border-t border-slate-200">
+                  <div className="text-[11px] font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                    <span>Or Provide Direct Video Link / eBay Media ID:</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[10px] font-medium text-slate-500 mb-1">
+                        Video URL (Direct .MP4 / Web Link):
+                      </label>
+                      <input
+                        type="url"
+                        value={videoUrl.startsWith('blob:') ? '' : videoUrl}
+                        onChange={(e) => setVideoUrl(e.target.value.trim())}
+                        placeholder="https://example.com/diamond-video.mp4"
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-medium text-slate-500 mb-1">
+                        eBay Media ID (Connected on eBay):
+                      </label>
+                      <input
+                        type="text"
+                        value={videoId}
+                        onChange={(e) => setVideoId(e.target.value.trim())}
+                        placeholder="e.g. 50012345678"
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white"
+                      />
+                    </div>
                   </div>
                 </div>
 
