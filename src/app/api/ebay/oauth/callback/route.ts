@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
   const isSandbox = Boolean(
     stateEnv === 'sandbox' ||
-    (stateEnv !== 'production' && (masterConfig.environment === 'sandbox' || masterConfig.masterAppId?.includes('-SBX-')))
+    (stateEnv !== 'production' && masterConfig.environment === 'sandbox')
   );
 
   const effectiveAppId = isSandbox
@@ -145,6 +145,7 @@ export async function GET(request: Request) {
     const store = getStore();
     const targetAcc = store.accounts.find((a) => a.id === newAccount.id);
     if (targetAcc) {
+      targetAcc.environment = isSandbox ? 'sandbox' : 'production';
       targetAcc.accessToken = tokenData.access_token;
       targetAcc.refreshToken = tokenData.refresh_token;
       targetAcc.tokenExpiresAt = new Date(Date.now() + (tokenData.refresh_token_expires_in || 47304000) * 1000).toISOString();

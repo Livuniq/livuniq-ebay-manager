@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAccounts, getActiveAccountId, ensureStoreAsync, getStore, updateListing } from '@/lib/ebay/server-store';
+import { getAccounts, getActiveAccountId, ensureStoreAsync, getStore, updateListing, getAccountForEnvironment } from '@/lib/ebay/server-store';
 import { ensureFreshAccessToken, uploadVideoToEbayMediaApi, reviseLiveEbayListing } from '@/lib/ebay/live-sync';
 import { extractGoogleDriveId } from '@/lib/ebay/google-drive-scanner';
 
@@ -35,11 +35,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const account =
-      accounts.find((a) => a.id === targetAccountId) ||
-      accounts.find((a) => a.ebayUsername === 'livuniq') ||
-      accounts.find((a) => a.id === getActiveAccountId()) ||
-      accounts.find((a) => a.accessToken);
+    const account = getAccountForEnvironment(targetAccountId);
 
     if (!account) {
       return NextResponse.json(

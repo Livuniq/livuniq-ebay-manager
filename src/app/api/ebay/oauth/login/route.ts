@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
 
   const reqEnv = searchParams.get('env');
-  const isSandbox = reqEnv === 'sandbox' || (reqEnv !== 'production' && (masterConfig.environment === 'sandbox' || masterConfig.masterAppId?.includes('-SBX-')));
+  const isSandbox = reqEnv === 'sandbox' || (reqEnv !== 'production' && masterConfig.environment === 'sandbox');
 
   const effectiveAppId = isSandbox
     ? (masterConfig.sandboxAppId || masterConfig.masterAppId)

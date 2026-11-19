@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getStore, getActiveAccountId, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
-import { ensureFreshAccessToken } from '@/lib/ebay/live-sync';
+import { getStore, getActiveAccountId, ensureStoreAsync, saveStoreAsync, getAccountForEnvironment } from '@/lib/ebay/server-store';
+import { ensureFreshAccessToken, isAccountSandbox } from '@/lib/ebay/live-sync';
 
 export interface EbayBusinessPolicyItem {
   id: string;
@@ -16,17 +16,17 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const store = getStore();
     const accountId = searchParams.get('accountId') || getActiveAccountId();
-    const account = store.accounts.find((a) => a.id === accountId) || store.accounts[0];
+    const account = getAccountForEnvironment(accountId);
 
     if (!account) {
       return NextResponse.json({ success: false, error: 'Account not found' }, { status: 404 });
     }
 
     const masterConfig = store.masterConfig;
-    const apiHost =
-      masterConfig.environment === 'sandbox'
-        ? 'https://api.sandbox.ebay.com'
-        : 'https://api.ebay.com';
+    const isSandbox = isAccountSandbox(account, masterConfig);
+    const apiHost = isSandbox
+      ? 'https://api.sandbox.ebay.com'
+      : 'https://api.ebay.com';
 
     let shippingPolicies: EbayBusinessPolicyItem[] = [];
     let returnPolicies: EbayBusinessPolicyItem[] = [];

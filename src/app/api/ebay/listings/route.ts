@@ -7,6 +7,7 @@ import {
   clearAllListings,
   getActiveAccountId,
   getAccounts,
+  getAccountForEnvironment,
   ensureStoreAsync,
   getStore,
   saveStoreAsync,
@@ -37,11 +38,7 @@ export async function POST(request: Request) {
     }
 
     const targetAccountId = data.accountId || getActiveAccountId();
-    const accounts = getAccounts();
-    let account = accounts.find((a) => a.id === targetAccountId);
-    if (!account) {
-      account = accounts.find((a) => a.id === getActiveAccountId()) || accounts[0];
-    }
+    let account = getAccountForEnvironment(targetAccountId);
 
     let ebayLiveStatus = 'LOCAL';
     let ebayMessage = '';
@@ -213,11 +210,7 @@ export async function PATCH(request: Request) {
 
     // Only revise on live eBay servers if user explicitly clicked "Update to Store" / "Push to eBay"
     if (shouldPushToEbay) {
-      const accounts = getAccounts();
-      let account = accounts.find((a) => a.id === currentListing.accountId);
-      if (!account) {
-        account = accounts.find((a) => a.id === getActiveAccountId()) || accounts[0];
-      }
+      let account = getAccountForEnvironment(currentListing.accountId);
 
       console.log('Pushing listing to eBay live:', {
         listingId: currentListing.id,
@@ -423,7 +416,7 @@ export async function DELETE(request: Request) {
     const endOnEbay = searchParams.get('endOnEbay') !== 'false';
     const accountId = searchParams.get('accountId') || getActiveAccountId();
     const accounts = getAccounts();
-    const account = accounts.find((a) => a.id === accountId) || accounts[0];
+    const account = getAccountForEnvironment(accountId);
 
     if (all) {
       // User rule: Removal must ALWAYS be strictly scoped to the active store only

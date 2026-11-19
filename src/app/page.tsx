@@ -952,6 +952,34 @@ export default function Home() {
     }
   };
 
+  // Switch Active Environment (Production Live vs Developer Sandbox vs Demo Simulator)
+  const handleSwitchEnvironment = async (newEnv: 'production' | 'sandbox' | 'demo') => {
+    setMasterEnv(newEnv);
+    if (newEnv === 'production' || newEnv === 'sandbox') {
+      setCredActiveTab(newEnv);
+    }
+    try {
+      const res = await fetch('/api/ebay/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environment: newEnv }),
+      });
+      const data = await res.json();
+      if (data.success && data.config) {
+        setMasterConfig(data.config);
+        if (data.activeAccountId) {
+          setActiveAccountId(data.activeAccountId);
+          await fetchAccountsAndData(data.activeAccountId);
+        }
+        if (data.accounts) {
+          setAccounts(data.accounts);
+        }
+      }
+    } catch (e) {
+      console.error('Quick switch environment error:', e);
+    }
+  };
+
   // Save Master Settings (Dual-Credential: Developer Sandbox + Production Live)
   const handleSaveMasterSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -998,6 +1026,13 @@ export default function Home() {
         setProductionAppId(data.config.productionAppId || productionAppId);
         setProductionCertId(data.config.productionCertId || productionCertId);
         setProductionRuName(data.config.productionRuName || productionRuName);
+        if (data.activeAccountId) {
+          setActiveAccountId(data.activeAccountId);
+          await fetchAccountsAndData(data.activeAccountId);
+        }
+        if (data.accounts) {
+          setAccounts(data.accounts);
+        }
         setSettingsSuccess(true);
         setTimeout(() => setSettingsSuccess(false), 3000);
       }
@@ -1008,7 +1043,12 @@ export default function Home() {
     }
   };
 
-  const activeAccount = accounts.find((a) => a.id === activeAccountId) || accounts[0];
+  const activeAccount =
+    accounts.find((a) => a.id === activeAccountId) ||
+    (masterEnv === 'production'
+      ? accounts.find((a) => (a as any).environment === 'production' || a.ebayUsername.toLowerCase() === 'livuniq' || !a.ebayUsername.toLowerCase().startsWith('testuser_'))
+      : accounts.find((a) => (a as any).environment === 'sandbox' || a.ebayUsername.toLowerCase().startsWith('testuser_'))) ||
+    accounts[0];
 
   // Active Store Metrics
   const activeListingsCount = listings.filter((l) => isListingLive(l)).length;
@@ -1075,11 +1115,15 @@ export default function Home() {
                 onChange={(e) => handleSwitchAccount(e.target.value)}
                 className="w-full bg-slate-800 hover:bg-slate-700/80 text-slate-100 font-semibold text-xs rounded-lg py-2 pl-3 pr-8 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer transition appearance-none"
               >
-                {accounts.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.storeName} ({acc.marketplace})
-                  </option>
-                ))}
+                {accounts.map((acc) => {
+                  const isSbx = Boolean((acc as any).environment === 'sandbox' || acc.ebayUsername.toLowerCase().startsWith('testuser_'));
+                  const badge = isSbx ? '🧪 Sandbox' : '🚀 Live';
+                  return (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.storeName || acc.ebayUsername} ({badge})
+                    </option>
+                  );
+                })}
               </select>
               <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
             </div>
@@ -2515,10 +2559,7 @@ export default function Home() {
                     {/* Sandbox Option */}
                     <button
                       type="button"
-                      onClick={() => {
-                        setMasterEnv('sandbox');
-                        setCredActiveTab('sandbox');
-                      }}
+                      onClick={() => handleSwitchEnvironment('sandbox')}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
                         masterEnv === 'sandbox'
                           ? 'bg-white border-amber-500 shadow-sm ring-2 ring-amber-500/20'
@@ -2535,10 +2576,7 @@ export default function Home() {
                     {/* Production Option */}
                     <button
                       type="button"
-                      onClick={() => {
-                        setMasterEnv('production');
-                        setCredActiveTab('production');
-                      }}
+                      onClick={() => handleSwitchEnvironment('production')}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
                         masterEnv === 'production'
                           ? 'bg-white border-emerald-500 shadow-sm ring-2 ring-emerald-500/20'
@@ -2555,7 +2593,7 @@ export default function Home() {
                     {/* Demo Option */}
                     <button
                       type="button"
-                      onClick={() => setMasterEnv('demo')}
+                      onClick={() => handleSwitchEnvironment('demo')}
                       className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
                         masterEnv === 'demo'
                           ? 'bg-white border-purple-500 shadow-sm ring-2 ring-purple-500/20'

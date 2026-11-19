@@ -14,17 +14,24 @@ export async function GET(request: Request) {
     'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
   ].join(' ');
 
-  const authHost =
-    masterConfig.environment === 'production'
-      ? 'https://auth.ebay.com/oauth2/authorize'
-      : 'https://auth.sandbox.ebay.com/oauth2/authorize';
+  const isSandbox = masterConfig.environment === 'sandbox';
+  const effectiveAppId = isSandbox
+    ? (masterConfig.sandboxAppId || masterConfig.masterAppId)
+    : (masterConfig.productionAppId || masterConfig.masterAppId);
+  const effectiveRuName = isSandbox
+    ? (masterConfig.sandboxRuName || masterConfig.masterRuName)
+    : (masterConfig.productionRuName || masterConfig.masterRuName);
+
+  const authHost = isSandbox
+    ? 'https://auth.sandbox.ebay.com/oauth2/authorize'
+    : 'https://auth.ebay.com/oauth2/authorize';
 
   // If live keys are configured, generate the actual eBay OAuth URL
-  const targetUrl = masterConfig.isLiveConfigured
+  const targetUrl = Boolean(effectiveAppId && effectiveRuName)
     ? `${authHost}?client_id=${encodeURIComponent(
-        masterConfig.masterAppId
+        effectiveAppId
       )}&response_type=code&redirect_uri=${encodeURIComponent(
-        masterConfig.masterRuName
+        effectiveRuName
       )}&scope=${encodeURIComponent(scopes)}&state=${marketplace}`
     : null;
 

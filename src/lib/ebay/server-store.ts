@@ -62,6 +62,7 @@ export async function ensureStoreAsync(): Promise<AppStore> {
             };
           }
           memoryStore = dbData as AppStore;
+          normalizeAccountEnvironments(memoryStore);
           lastDbFetchTime = now;
           return memoryStore;
         } else if (!dbData && memoryStore) {
@@ -208,6 +209,17 @@ export function updateMasterConfig(updates: Partial<MasterAppConfig>): MasterApp
     activeRuName = sandboxRuName || updates.masterRuName || '';
   }
 
+  // When environment changes, auto-switch activeAccountId to an account that matches the new environment!
+  if (updates.environment) {
+    const isProd = updates.environment === 'production';
+    const matchingAcc = isProd
+      ? store.accounts.find((a) => (a as any).environment === 'production' || a.ebayUsername.toLowerCase() === 'livuniq' || !a.ebayUsername.toLowerCase().startsWith('testuser_'))
+      : store.accounts.find((a) => (a as any).environment === 'sandbox' || a.ebayUsername.toLowerCase().startsWith('testuser_'));
+    if (matchingAcc) {
+      store.activeAccountId = matchingAcc.id;
+    }
+  }
+
   store.masterConfig = {
     ...prev,
     ...updates,
@@ -223,24 +235,97 @@ export function updateMasterConfig(updates: Partial<MasterAppConfig>): MasterApp
     masterRuName: activeRuName || '',
     isLiveConfigured: Boolean((activeAppId && activeRuName) || (sandboxAppId && sandboxRuName) || (productionAppId && productionRuName)),
   };
+  normalizeAccountEnvironments(store);
   saveStore(store);
   return store.masterConfig;
 }
 
+// Environment & Account Utilities
+export function normalizeAccountEnvironments(store: AppStore) {
+  if (!store || !Array.isArray(store.accounts)) return;
+  for (const acc of store.accounts) {
+    if (!acc.environment) {
+      if (acc.ebayUsername.toLowerCase().startsWith('testuser_')) {
+        acc.environment = 'sandbox';
+      } else if (acc.ebayUsername.toLowerCase() === 'livuniq') {
+        acc.environment = 'production';
+      } else {
+        acc.environment = store.masterConfig?.environment === 'sandbox' ? 'sandbox' : 'production';
+      }
+    }
+  }
+}
+
+export function isProductionEnvironment(): boolean {
+  const store = getStore();
+  return store.masterConfig?.environment === 'production';
+}
+
+export function isAccountForCurrentEnvironment(account: ConnectedAccount): boolean {
+  const isProd = isProductionEnvironment();
+  const accIsSandbox = Boolean(
+    account.environment === 'sandbox' ||
+    account.ebayUsername.toLowerCase().startsWith('testuser_')
+  );
+  return isProd ? !accIsSandbox : accIsSandbox;
+}
+
+export function getAccountForEnvironment(accountId?: string): ConnectedAccount | null {
+  const store = getStore();
+  const isProd = isProductionEnvironment();
+
+  // 1. If explicit accountId provided and it matches current environment, return it
+  if (accountId) {
+    const acc = store.accounts.find((a) => a.id === accountId);
+    if (acc && isAccountForCurrentEnvironment(acc)) {
+      return acc;
+    }
+  }
+
+  // 2. Otherwise find account matching current environment
+  if (isProd) {
+    const prodAcc =
+      store.accounts.find((a) => a.environment === 'production') ||
+      store.accounts.find((a) => a.ebayUsername.toLowerCase() === 'livuniq') ||
+      store.accounts.find((a) => !a.ebayUsername.toLowerCase().startsWith('testuser_'));
+    if (prodAcc) return prodAcc;
+  } else {
+    const sbxAcc =
+      store.accounts.find((a) => a.environment === 'sandbox') ||
+      store.accounts.find((a) => a.ebayUsername.toLowerCase().startsWith('testuser_'));
+    if (sbxAcc) return sbxAcc;
+  }
+
+  // 3. Fallback to activeAccountId if valid, or first account
+  const activeAcc = store.accounts.find((a) => a.id === store.activeAccountId);
+  return activeAcc || store.accounts[0] || null;
+}
+
 // Multi-Account Operations
 export function getAccounts(): ConnectedAccount[] {
-  return getStore().accounts;
+  const store = getStore();
+  normalizeAccountEnvironments(store);
+  return store.accounts;
 }
 
 export function getActiveAccountId(): string {
   const store = getStore();
   if (!store.accounts || store.accounts.length === 0) return '';
-  const currentExists = store.accounts.some((a) => a.id === store.activeAccountId);
-  if (!currentExists) {
-    store.activeAccountId = store.accounts[0].id;
-    saveStore(store);
+  normalizeAccountEnvironments(store);
+
+  const current = store.accounts.find((a) => a.id === store.activeAccountId);
+  if (current && isAccountForCurrentEnvironment(current)) {
+    return store.activeAccountId;
   }
-  return store.activeAccountId;
+
+  const matched = getAccountForEnvironment();
+  if (matched) {
+    store.activeAccountId = matched.id;
+    saveStore(store);
+    return matched.id;
+  }
+
+  return store.accounts[0]?.id || '';
 }
 
 export function setActiveAccountId(accountId: string): string {
@@ -257,11 +342,13 @@ export function connectNewAccount(params: {
   ebayUsername: string;
   storeName?: string;
   marketplace?: 'EBAY_US' | 'EBAY_GB' | 'EBAY_DE' | 'EBAY_AU' | 'EBAY_IN';
+  environment?: 'sandbox' | 'production';
 }): ConnectedAccount {
   const store = getStore();
   const id = `acc-${Date.now().toString().slice(-6)}`;
   const marketplace = params.marketplace || 'EBAY_US';
   const currency = marketplace === 'EBAY_GB' ? 'GBP' : marketplace === 'EBAY_DE' ? 'EUR' : 'USD';
+  const env = params.environment || (params.ebayUsername.toLowerCase().startsWith('testuser_') ? 'sandbox' : (store.masterConfig?.environment || 'production'));
 
   const newAccount: ConnectedAccount = {
     id,
@@ -271,6 +358,7 @@ export function connectNewAccount(params: {
     currency,
     sellerLevel: 'Above Standard',
     status: 'ACTIVE',
+    environment: env,
     avatarUrl: `https://api.dicebear.com/7.x/identicon/svg?seed=${params.ebayUsername}`,
     connectedAt: new Date().toISOString(),
     lastSyncedAt: new Date().toISOString(),

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMasterConfig, updateMasterConfig, ensureStoreAsync } from '@/lib/ebay/server-store';
+import { getMasterConfig, updateMasterConfig, ensureStoreAsync, getActiveAccountId, getAccounts } from '@/lib/ebay/server-store';
 
 export async function GET() {
   await ensureStoreAsync();
@@ -44,7 +44,14 @@ export async function POST(request: Request) {
       productionCertId: body.productionCertId,
       productionRuName: body.productionRuName,
     });
-    return NextResponse.json({ success: true, config: updated });
+    const activeAccountId = getActiveAccountId();
+    const accounts = getAccounts();
+    return NextResponse.json({
+      success: true,
+      config: updated,
+      activeAccountId,
+      accounts,
+    });
   } catch (error) {
     return NextResponse.json(
       { success: false, error: (error as Error).message },

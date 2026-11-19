@@ -26,14 +26,23 @@ export function isSandboxEnv(masterConfig: any): boolean {
 }
 
 export function isAccountSandbox(account?: ConnectedAccount, masterConfig?: any): boolean {
+  if (masterConfig?.environment === 'production') {
+    if (account?.ebayUsername?.toLowerCase().startsWith('testuser_') || (account as any)?.environment === 'sandbox') return true;
+    return false;
+  }
+  if (masterConfig?.environment === 'sandbox') {
+    if (account?.ebayUsername?.toLowerCase() === 'livuniq' && (account as any)?.environment === 'production') {
+      return false;
+    }
+    return true;
+  }
+
   const accAny = account as any;
   if (accAny?.environment === 'production') return false;
   if (accAny?.environment === 'sandbox') return true;
   if (account?.ebayUsername?.toLowerCase().startsWith('testuser_')) return true;
   if (account?.ebayUsername?.toLowerCase() === 'livuniq') return false;
-  if (masterConfig?.environment === 'production') return false;
-  if (masterConfig?.environment === 'sandbox') return true;
-  return Boolean(masterConfig?.masterAppId?.includes('-SBX-'));
+  return isSandboxEnv(masterConfig);
 }
 
 // Automatically refresh user access token using refreshToken when expired
@@ -41,13 +50,13 @@ export async function ensureFreshAccessToken(account: ConnectedAccount, force = 
   const store = getStore();
   const masterConfig = store.masterConfig;
 
-  const isSandbox = isSandboxEnv(masterConfig);
+  const isSandbox = isAccountSandbox(account, masterConfig);
   const effectiveAppId = isSandbox
-    ? (masterConfig.sandboxAppId || masterConfig.masterAppId)
-    : (masterConfig.productionAppId || masterConfig.masterAppId);
+    ? (masterConfig.sandboxAppId || (masterConfig.masterAppId?.includes('-SBX-') ? masterConfig.masterAppId : ''))
+    : (masterConfig.productionAppId || (!masterConfig.masterAppId?.includes('-SBX-') ? masterConfig.masterAppId : ''));
   const effectiveCertId = isSandbox
-    ? (masterConfig.sandboxCertId || masterConfig.masterCertId)
-    : (masterConfig.productionCertId || masterConfig.masterCertId);
+    ? (masterConfig.sandboxCertId || (masterConfig.masterAppId?.includes('-SBX-') ? masterConfig.masterCertId : ''))
+    : (masterConfig.productionCertId || (!masterConfig.masterAppId?.includes('-SBX-') ? masterConfig.masterCertId : ''));
 
   if (!account.refreshToken || !effectiveAppId || !effectiveCertId) {
     return account.accessToken;
@@ -176,7 +185,7 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
   }
 
   const tradingUrl =
-    isSandboxEnv(masterConfig)
+    isAccountSandbox(account, masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -897,7 +906,7 @@ export async function reviseLiveEbayListing(
   }
 
   const tradingUrl =
-    isSandboxEnv(masterConfig)
+    isAccountSandbox(account, masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -951,7 +960,7 @@ export async function reviseLiveEbayListing(
             const ebayForm = new FormData();
             ebayForm.append('image', new Blob([buf], { type: 'image/jpeg' }), path.basename(localPath));
             const epsEndpoint =
-              isSandboxEnv(masterConfig)
+              isAccountSandbox(account, masterConfig)
                 ? 'https://apim.sandbox.ebay.com/commerce/media/v1_beta/image/create_image_from_file'
                 : 'https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file';
             const epsRes = await fetch(epsEndpoint, {
@@ -1165,7 +1174,7 @@ export async function addLiveEbayListing(
   }
 
   const tradingUrl =
-    isSandboxEnv(masterConfig)
+    isAccountSandbox(account, masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -1206,7 +1215,7 @@ export async function addLiveEbayListing(
           const ebayForm = new FormData();
           ebayForm.append('image', new Blob([buf], { type: 'image/jpeg' }), path.basename(localPath));
           const epsEndpoint =
-            isSandboxEnv(masterConfig)
+            isAccountSandbox(account, masterConfig)
               ? 'https://apim.sandbox.ebay.com/commerce/media/v1_beta/image/create_image_from_file'
               : 'https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file';
           const epsRes = await fetch(epsEndpoint, {
@@ -1389,7 +1398,7 @@ export async function endLiveEbayListing(
   }
 
   const tradingUrl =
-    isSandboxEnv(masterConfig)
+    isAccountSandbox(account, masterConfig)
       ? 'https://api.sandbox.ebay.com/ws/api.dll'
       : 'https://api.ebay.com/ws/api.dll';
 
@@ -1628,7 +1637,7 @@ export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack =
     return 0;
   }
 
-  const tradingUrl = isSandboxEnv(masterConfig)
+  const tradingUrl = isAccountSandbox(account, masterConfig)
     ? 'https://api.sandbox.ebay.com/ws/api.dll'
     : 'https://api.ebay.com/ws/api.dll';
 
@@ -1978,7 +1987,7 @@ export async function sendLiveEbayReply(
     return { success: false, message: 'No active access token for account' };
   }
 
-  const tradingUrl = isSandboxEnv(masterConfig)
+  const tradingUrl = isAccountSandbox(account, masterConfig)
     ? 'https://api.sandbox.ebay.com/ws/api.dll'
     : 'https://api.ebay.com/ws/api.dll';
 

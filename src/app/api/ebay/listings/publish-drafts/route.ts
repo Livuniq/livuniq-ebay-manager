@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStore, saveStore, getActiveAccountId, ensureStoreAsync, saveStoreAsync } from '@/lib/ebay/server-store';
+import { getStore, saveStore, getActiveAccountId, ensureStoreAsync, saveStoreAsync, getAccountForEnvironment } from '@/lib/ebay/server-store';
 import { addLiveEbayListing, reviseLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 import { isVideoMedia } from '@/lib/ebay/template-engine';
 
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     const targetAccountId = body.accountId || getActiveAccountId();
     const store = getStore();
 
-    const account = store.accounts.find((a) => a.id === targetAccountId) || store.accounts[0];
+    const account = getAccountForEnvironment(targetAccountId);
     if (!account) {
       return NextResponse.json({ success: false, error: 'No connected eBay account found' }, { status: 400 });
     }
@@ -74,9 +74,10 @@ export async function POST(request: Request) {
         (u) => Boolean(u && u.trim()) && !isVideoMedia(u)
       );
 
+      const listingAcc = getAccountForEnvironment(draft.accountId) || account;
       if (draft.ebayListingId) {
         // Item already exists on eBay, revise it to make sure changes & active state are synced
-        const reviseRes = await reviseLiveEbayListing(account, draft.ebayListingId, {
+        const reviseRes = await reviseLiveEbayListing(listingAcc, draft.ebayListingId, {
           title: draft.title,
           price: draft.price,
           quantity: draft.quantity,
@@ -106,7 +107,7 @@ export async function POST(request: Request) {
         }
       } else {
         // Item not yet on eBay, create live listing
-        const addRes = await addLiveEbayListing(account, {
+        const addRes = await addLiveEbayListing(listingAcc, {
           title: draft.title,
           price: draft.price,
           quantity: draft.quantity,

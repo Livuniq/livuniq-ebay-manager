@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { getAccounts, getActiveAccountId, getMasterConfig } from '@/lib/ebay/server-store';
+import { getAccounts, getActiveAccountId, getMasterConfig, getAccountForEnvironment } from '@/lib/ebay/server-store';
 import { processVideoForEbay } from '@/lib/video-processor';
-import { ensureFreshAccessToken } from '@/lib/ebay/live-sync';
+import { ensureFreshAccessToken, isAccountSandbox } from '@/lib/ebay/live-sync';
 
 export const maxDuration = 120;
 
@@ -21,8 +21,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const accounts = getAccounts();
-    const account = accounts.find((a) => a.id === reqAccountId) || accounts.find((a) => a.accessToken);
+    const account = getAccountForEnvironment(reqAccountId);
     if (account) {
       await ensureFreshAccessToken(account);
     }
@@ -46,8 +45,9 @@ export async function POST(request: Request) {
     }
 
     const masterConfig = getMasterConfig();
+    const isSandbox = isAccountSandbox(account || undefined, masterConfig);
     const mediaEndpoint =
-      masterConfig.environment === 'sandbox'
+      isSandbox
         ? 'https://apim.sandbox.ebay.com/commerce/media/v1_beta/image/create_image_from_file'
         : 'https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file';
 

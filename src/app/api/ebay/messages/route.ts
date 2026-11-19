@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getMessageThreads, sendReply, markThreadAsRead, getStore, saveStore, getActiveAccountId, ensureStoreAsync } from '@/lib/ebay/server-store';
+import { getMessageThreads, sendReply, markThreadAsRead, getStore, saveStore, getActiveAccountId, ensureStoreAsync, getAccountForEnvironment } from '@/lib/ebay/server-store';
 import { syncLiveEbayMessages, sendLiveEbayReply } from '@/lib/ebay/live-sync';
 
 export async function GET(request: Request) {
@@ -11,8 +11,8 @@ export async function GET(request: Request) {
     const days = parseInt(searchParams.get('days') || '365');
 
     const store = getStore();
-    const targetAccountId = accountId || store.activeAccountId;
-    const account = store.accounts.find((a) => a.id === targetAccountId);
+    const targetAccountId = accountId || getActiveAccountId();
+    const account = getAccountForEnvironment(targetAccountId);
 
     let liveSyncedCount = 0;
     if (doSync && account && account.accessToken) {
@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     if (body.action === 'sync') {
       const store = getStore();
       const targetAccountId = body.accountId || getActiveAccountId();
-      const account = store.accounts.find((a) => a.id === targetAccountId) || store.accounts[0];
+      const account = getAccountForEnvironment(targetAccountId);
 
       if (!account || !account.accessToken) {
         return NextResponse.json({
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     if (body.action === 'simulate') {
       const store = getStore();
       const targetAccountId = body.accountId || getActiveAccountId();
-      const account = store.accounts.find((a) => a.id === targetAccountId) || store.accounts[0];
+      const account = getAccountForEnvironment(targetAccountId);
 
       const sampleQueries = [
         {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStore, getActiveAccountId, ensureStoreAsync } from '@/lib/ebay/server-store';
+import { getStore, getActiveAccountId, ensureStoreAsync, getAccountForEnvironment } from '@/lib/ebay/server-store';
 import { syncLiveEbayData } from '@/lib/ebay/live-sync';
 import fs from 'fs';
 import path from 'path';
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const store = getStore();
     const accountId = body.accountId || getActiveAccountId();
-    const account = store.accounts.find((a) => a.id === accountId);
+    const account = getAccountForEnvironment(accountId);
 
     if (!account) {
       return NextResponse.json({ success: false, error: 'Account not found' }, { status: 404 });

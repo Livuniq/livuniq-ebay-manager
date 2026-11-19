@@ -6,6 +6,7 @@ export interface ConnectedAccount {
   currency: string;
   sellerLevel: 'Top Rated Plus' | 'Above Standard' | 'Standard';
   status: 'ACTIVE' | 'SYNCING' | 'DISCONNECTED';
+  environment?: 'sandbox' | 'production' | 'demo';
   avatarUrl?: string;
   connectedAt: string;
   lastSyncedAt: string;
