@@ -7,6 +7,7 @@ import {
   clearAllMessageThreads,
   getStore,
   saveStore,
+  saveStoreAsync,
   getActiveAccountId,
   ensureStoreAsync,
   getAccountForEnvironment,
@@ -135,7 +136,7 @@ export async function POST(request: Request) {
       };
 
       store.threads.unshift(newThread);
-      saveStore(store);
+      await saveStoreAsync(store);
 
       return NextResponse.json({ success: true, thread: newThread });
     }
@@ -153,6 +154,8 @@ export async function POST(request: Request) {
     if (!updated) {
       return NextResponse.json({ success: false, error: 'Thread not found' }, { status: 404 });
     }
+
+    await saveStoreAsync(getStore());
 
     // Dispatch reply to live eBay if seller has an active OAuth access token
     let liveReplyResult: { success: boolean; message: string } | null = null;
@@ -189,6 +192,9 @@ export async function PATCH(request: Request) {
     }
 
     const marked = markThreadAsRead(threadId);
+    if (marked) {
+      await saveStoreAsync(getStore());
+    }
     return NextResponse.json({ success: marked });
   } catch (err) {
     return NextResponse.json(
@@ -208,6 +214,7 @@ export async function DELETE(request: Request) {
 
     if (clearAll) {
       const removedCount = clearAllMessageThreads(accountId);
+      await saveStoreAsync(getStore());
       const remainingThreads = getMessageThreads(accountId);
       return NextResponse.json({
         success: true,
@@ -224,6 +231,7 @@ export async function DELETE(request: Request) {
     }
 
     const deleted = deleteMessageThread(threadId, accountId);
+    await saveStoreAsync(getStore());
     const remainingThreads = getMessageThreads(accountId);
     return NextResponse.json({
       success: true,
