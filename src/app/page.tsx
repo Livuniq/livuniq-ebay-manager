@@ -2848,7 +2848,7 @@ export default function Home() {
                             setGoogleDriveApiKey(e.target.value);
                             setGdriveKeyTestResult(null);
                           }}
-                          placeholder="AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                          placeholder="Enter Google Cloud API Key (e.g. from Cloud Console)"
                           className="w-full border border-slate-300 rounded-lg p-2.5 pr-12 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                         />
                         <button

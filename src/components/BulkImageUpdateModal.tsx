@@ -756,7 +756,7 @@ export default function BulkImageUpdateModal({
                             type="text"
                             value={gdriveApiKey}
                             onChange={(e) => setGdriveApiKey(e.target.value)}
-                            placeholder="AIzaSy..."
+                            placeholder="Enter Google Cloud API Key..."
                             className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                           />
                           <p className="text-[10px] text-slate-500 leading-relaxed">

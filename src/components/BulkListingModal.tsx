@@ -1759,7 +1759,7 @@ export default function BulkListingModal({
                           type="password"
                           value={gdriveApiKey}
                           onChange={(e) => setGdriveApiKey(e.target.value)}
-                          placeholder="AIzaSy..."
+                          placeholder="Enter Google Cloud API Key..."
                           className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono"
                         />
                       </div>
