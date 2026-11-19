@@ -1838,9 +1838,14 @@ export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack =
           const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
           const thrId = `thr-ebay-${account.id}-${senderId.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
 
-          // If this thread was deleted by the user, do not resurrect it
+          // If this thread was deleted by the user, do not resurrect old messages unless there is a fresh unanswered message from buyer
           if (account.deletedThreadIds?.includes(thrId)) {
-            continue;
+            if (!isUnanswered) {
+              continue;
+            } else {
+              // New unanswered buyer message! Revive thread
+              account.deletedThreadIds = account.deletedThreadIds.filter((id) => id !== thrId);
+            }
           }
 
           if (newThreadsMap.has(thrId)) {
@@ -1963,9 +1968,14 @@ export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack =
         const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
         const thrId = `thr-ebay-${account.id}-${sender.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
 
-        // If this thread was deleted by the user, do not resurrect it
+        // If this thread was deleted by the user, do not resurrect old messages unless there is a fresh unread buyer message
         if (account.deletedThreadIds?.includes(thrId)) {
-          continue;
+          if (read) {
+            continue;
+          } else {
+            // New unread buyer message! Revive thread
+            account.deletedThreadIds = account.deletedThreadIds.filter((id) => id !== thrId);
+          }
         }
 
         if (newThreadsMap.has(thrId)) {

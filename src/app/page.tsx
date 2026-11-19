@@ -138,6 +138,13 @@ export default function Home() {
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
 
+  const activeAccount =
+    accounts.find((a) => a.id === activeAccountId) ||
+    (masterEnv === 'production'
+      ? accounts.find((a) => (a as any).environment === 'production' || a.ebayUsername.toLowerCase() === 'livuniq' || !a.ebayUsername.toLowerCase().startsWith('testuser_'))
+      : accounts.find((a) => (a as any).environment === 'sandbox' || a.ebayUsername.toLowerCase().startsWith('testuser_'))) ||
+    accounts[0];
+
   // Sync Diagnostics Modal & State
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncResult, setSyncResult] = useState<{
@@ -925,17 +932,21 @@ export default function Home() {
     }
   };
 
-  // Load messages when opening the messages tab without forcing a deep live re-pull
+  // Load messages when opening the messages tab
   useEffect(() => {
     if (activeTab === 'messages') {
       handleSyncMessages(false);
+      // Fast live sync in background when opening tab to instantly pull latest messages
+      if (activeAccount?.accessToken) {
+        handleSyncMessages(true, 7);
+      }
     }
   }, [activeTab, activeAccountId]);
 
   // Live Auto-Refresh: Real-time background sync for instant message delivery
   useEffect(() => {
-    // Check DB every 5 seconds when on Messages tab, every 30 seconds across dashboard
-    const pollIntervalMs = activeTab === 'messages' ? 5000 : 30000;
+    // 1. Check local DB every 4 seconds when on Messages tab, every 30 seconds across dashboard
+    const pollIntervalMs = activeTab === 'messages' ? 4000 : 30000;
     const pollTimer = setInterval(() => {
       fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId || '')}&sync=false`)
         .then((r) => r.json())
@@ -956,10 +967,35 @@ export default function Home() {
         .catch(() => {});
     }, pollIntervalMs);
 
+    // 2. Background eBay live sync every 25 seconds when on Messages tab (ensures 0 missed messages)
+    let liveSyncTimer: NodeJS.Timeout | null = null;
+    if (activeTab === 'messages' && activeAccount?.accessToken) {
+      liveSyncTimer = setInterval(() => {
+        fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId || '')}&sync=true&days=7`)
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.success && Array.isArray(data.threads)) {
+              setThreads((prev) => {
+                if (
+                  data.threads.length !== prev.length ||
+                  data.threads[0]?.lastUpdated !== prev[0]?.lastUpdated ||
+                  data.threads[0]?.unread !== prev[0]?.unread
+                ) {
+                  return data.threads;
+                }
+                return prev;
+              });
+            }
+          })
+          .catch(() => {});
+      }, 25000);
+    }
+
     return () => {
       clearInterval(pollTimer);
+      if (liveSyncTimer) clearInterval(liveSyncTimer);
     };
-  }, [activeTab, activeAccountId]);
+  }, [activeTab, activeAccountId, activeAccount?.accessToken]);
 
   // Delete single message thread
   const handleDeleteThread = async (threadId: string, e?: React.MouseEvent) => {
@@ -1157,13 +1193,6 @@ export default function Home() {
       setTestingGdriveKey(false);
     }
   };
-
-  const activeAccount =
-    accounts.find((a) => a.id === activeAccountId) ||
-    (masterEnv === 'production'
-      ? accounts.find((a) => (a as any).environment === 'production' || a.ebayUsername.toLowerCase() === 'livuniq' || !a.ebayUsername.toLowerCase().startsWith('testuser_'))
-      : accounts.find((a) => (a as any).environment === 'sandbox' || a.ebayUsername.toLowerCase().startsWith('testuser_'))) ||
-    accounts[0];
 
   // Active Store Metrics
   const activeListingsCount = listings.filter((l) => isListingLive(l)).length;

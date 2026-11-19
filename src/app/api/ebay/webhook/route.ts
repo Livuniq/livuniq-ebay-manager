@@ -184,47 +184,49 @@ export async function POST(request: Request) {
       if (targetAccount && messageBody) {
         const thrId = `thr-ebay-${targetAccount.id}-${senderId.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
 
-        // Verify if thread is in deletedThreadIds
-        if (!targetAccount.deletedThreadIds?.includes(thrId)) {
-          const existingThread = store.threads.find((t) => t.id === thrId);
-
-          const newMsg = {
-            id: `msg-${messageId}`,
-            sender: senderId,
-            senderRole: 'BUYER' as const,
-            timestamp: new Date().toISOString(),
-            body: messageBody,
-          };
-
-          if (existingThread) {
-            const isDup = existingThread.messages.some((m) => m.id === newMsg.id || m.body === newMsg.body);
-            if (!isDup) {
-              existingThread.messages.push(newMsg);
-              existingThread.lastMessageSnippet = messageBody.slice(0, 120);
-              existingThread.lastUpdated = newMsg.timestamp;
-              existingThread.unread = true;
-            }
-          } else {
-            const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
-            const newThread: EbayMessageThread = {
-              id: thrId,
-              accountId: targetAccount.id,
-              buyerUsername: senderId,
-              buyerName: senderId,
-              itemTitle: itemTitle || (itemId ? `Listing #${itemId}` : undefined),
-              listingId: itemId ? `lst-${itemId}` : undefined,
-              subject: cleanSubject || subject,
-              lastMessageSnippet: messageBody.slice(0, 120),
-              lastUpdated: new Date().toISOString(),
-              unread: true,
-              messages: [newMsg],
-            };
-            store.threads.unshift(newThread);
-          }
-
-          await saveStoreAsync(store);
-          console.log(`[eBay Webhook] Real-time message successfully saved for store: ${targetAccount.ebayUsername}`);
+        // If thread was previously cleared/deleted, revive it because a fresh live message arrived from buyer
+        if (targetAccount.deletedThreadIds?.includes(thrId)) {
+          targetAccount.deletedThreadIds = targetAccount.deletedThreadIds.filter((id) => id !== thrId);
         }
+
+        const existingThread = store.threads.find((t) => t.id === thrId);
+
+        const newMsg = {
+          id: `msg-${messageId}`,
+          sender: senderId,
+          senderRole: 'BUYER' as const,
+          timestamp: new Date().toISOString(),
+          body: messageBody,
+        };
+
+        if (existingThread) {
+          const isDup = existingThread.messages.some((m) => m.id === newMsg.id || m.body === newMsg.body);
+          if (!isDup) {
+            existingThread.messages.push(newMsg);
+            existingThread.lastMessageSnippet = messageBody.slice(0, 120);
+            existingThread.lastUpdated = newMsg.timestamp;
+            existingThread.unread = true;
+          }
+        } else {
+          const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
+          const newThread: EbayMessageThread = {
+            id: thrId,
+            accountId: targetAccount.id,
+            buyerUsername: senderId,
+            buyerName: senderId,
+            itemTitle: itemTitle || (itemId ? `Listing #${itemId}` : undefined),
+            listingId: itemId ? `lst-${itemId}` : undefined,
+            subject: cleanSubject || subject,
+            lastMessageSnippet: messageBody.slice(0, 120),
+            lastUpdated: new Date().toISOString(),
+            unread: true,
+            messages: [newMsg],
+          };
+          store.threads.unshift(newThread);
+        }
+
+        await saveStoreAsync(store);
+        console.log(`[eBay Webhook] Real-time message successfully saved for store: ${targetAccount.ebayUsername}`);
       }
     }
 
