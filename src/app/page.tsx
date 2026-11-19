@@ -932,6 +932,26 @@ export default function Home() {
     }
   };
 
+  // Play subtle incoming message chime
+  const playNotificationChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+    } catch (e) {}
+  };
+
   // Load messages when opening the messages tab
   useEffect(() => {
     if (activeTab === 'messages') {
@@ -943,59 +963,59 @@ export default function Home() {
     }
   }, [activeTab, activeAccountId]);
 
-  // Live Auto-Refresh: Real-time background sync for instant message delivery
+  // Global Real-time Message Listener: Active across ALL tabs for live badge and instant alerts
   useEffect(() => {
-    // 1. Check local DB every 4 seconds when on Messages tab, every 30 seconds across dashboard
-    const pollIntervalMs = activeTab === 'messages' ? 4000 : 30000;
+    if (!activeAccountId) return;
+
+    const updateThreadsIfChanged = (incomingThreads: EbayMessageThread[]) => {
+      setThreads((prev) => {
+        const prevUnread = prev.filter((t) => t.unread).length;
+        const newUnread = incomingThreads.filter((t) => t.unread).length;
+        if (newUnread > prevUnread) {
+          playNotificationChime();
+        }
+
+        const isChanged =
+          incomingThreads.length !== prev.length ||
+          incomingThreads[0]?.lastUpdated !== prev[0]?.lastUpdated ||
+          incomingThreads.some((t: any, i: number) => t.unread !== prev[i]?.unread);
+
+        return isChanged ? incomingThreads : prev;
+      });
+    };
+
+    // 1. Silent fast DB check every 4 seconds across ALL tabs (zero API cost, instant 30ms response)
     const pollTimer = setInterval(() => {
-      fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId || '')}&sync=false`)
+      fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId)}&sync=false`)
         .then((r) => r.json())
         .then((data) => {
           if (data.success && Array.isArray(data.threads)) {
-            setThreads((prev) => {
-              if (
-                data.threads.length !== prev.length ||
-                data.threads[0]?.lastUpdated !== prev[0]?.lastUpdated ||
-                data.threads[0]?.unread !== prev[0]?.unread
-              ) {
-                return data.threads;
-              }
-              return prev;
-            });
+            updateThreadsIfChanged(data.threads);
           }
         })
         .catch(() => {});
-    }, pollIntervalMs);
+    }, 4000);
 
-    // 2. Background eBay live sync every 25 seconds when on Messages tab (ensures 0 missed messages)
+    // 2. Background eBay Live Sync every 20 seconds across ALL tabs (ensures 100% live badge regardless of active tab)
     let liveSyncTimer: NodeJS.Timeout | null = null;
-    if (activeTab === 'messages' && activeAccount?.accessToken) {
+    if (activeAccount?.accessToken) {
       liveSyncTimer = setInterval(() => {
-        fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId || '')}&sync=true&days=7`)
+        fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId)}&sync=true&days=7`)
           .then((r) => r.json())
           .then((data) => {
             if (data.success && Array.isArray(data.threads)) {
-              setThreads((prev) => {
-                if (
-                  data.threads.length !== prev.length ||
-                  data.threads[0]?.lastUpdated !== prev[0]?.lastUpdated ||
-                  data.threads[0]?.unread !== prev[0]?.unread
-                ) {
-                  return data.threads;
-                }
-                return prev;
-              });
+              updateThreadsIfChanged(data.threads);
             }
           })
           .catch(() => {});
-      }, 25000);
+      }, 20000);
     }
 
     return () => {
       clearInterval(pollTimer);
       if (liveSyncTimer) clearInterval(liveSyncTimer);
     };
-  }, [activeTab, activeAccountId, activeAccount?.accessToken]);
+  }, [activeAccountId, activeAccount?.accessToken]);
 
   // Delete single message thread
   const handleDeleteThread = async (threadId: string, e?: React.MouseEvent) => {
@@ -1384,7 +1404,7 @@ export default function Home() {
                 <span>Customer Inbox</span>
               </div>
               {unreadMessagesCount > 0 && (
-                <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold">
+                <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse shadow-sm flex items-center justify-center min-w-[20px]">
                   {unreadMessagesCount}
                 </span>
               )}
