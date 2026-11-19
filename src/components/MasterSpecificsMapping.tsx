@@ -21,6 +21,10 @@ import {
   FolderOpen,
   Copy,
   ExternalLink,
+  RefreshCw,
+  AlertCircle,
+  Check,
+  Zap,
 } from 'lucide-react';
 import {
   DEFAULT_SPECIFICS_MAPPINGS,
@@ -93,6 +97,32 @@ export default function MasterSpecificsMapping({
   const [newCatEbayId, setNewCatEbayId] = useState('261975');
   const [newCatAliases, setNewCatAliases] = useState('');
 
+  // Live eBay Category Aspects from Taxonomy API
+  const [ebayAspects, setEbayAspects] = useState<any>(null);
+  const [loadingAspects, setLoadingAspects] = useState(false);
+  const [aspectsError, setAspectsError] = useState('');
+  const [aspectFilter, setAspectFilter] = useState<'all' | 'required' | 'recommended'>('all');
+
+  // Fetch eBay Category Aspects helper
+  const fetchEbayCategoryAspects = async (catId: string) => {
+    if (!catId) return;
+    setLoadingAspects(true);
+    setAspectsError('');
+    try {
+      const res = await fetch(`/api/ebay/category-aspects?categoryId=${catId}&accountId=${selectedAccountId || ''}`);
+      const data = await res.json();
+      if (data.success) {
+        setEbayAspects(data);
+      } else {
+        setAspectsError(data.error || 'Failed to fetch category aspects from eBay');
+      }
+    } catch (err: any) {
+      setAspectsError(err.message || 'Error fetching category aspects');
+    } finally {
+      setLoadingAspects(false);
+    }
+  };
+
   useEffect(() => {
     if (activeAccountId && activeAccountId !== selectedAccountId) {
       setSelectedAccountId(activeAccountId);
@@ -123,6 +153,46 @@ export default function MasterSpecificsMapping({
   }, [selectedAccountId]);
 
   const activeProfile = profiles.find((p) => p.id === activeProfileId) || profiles[0];
+
+  // Auto-fetch eBay Aspects whenever active category ID changes
+  useEffect(() => {
+    if (activeProfile?.ebayCategoryId) {
+      fetchEbayCategoryAspects(activeProfile.ebayCategoryId);
+    }
+  }, [activeProfile?.ebayCategoryId, selectedAccountId]);
+
+  // Auto-Populate all eBay Required & Recommended Aspects
+  const handleAutoPopulateEbayAspects = (onlyRequired = false) => {
+    if (!ebayAspects?.allAspects) return;
+    const targetList = onlyRequired ? ebayAspects.requiredAspects : ebayAspects.allAspects;
+
+    updateActiveProfile((p) => {
+      const existingFields = new Set(p.rules.map((r) => r.field.toLowerCase().trim()));
+      const newRulesToAdd: SpecificMappingRule[] = [];
+
+      for (const asp of targetList) {
+        if (!existingFields.has(asp.name.toLowerCase().trim())) {
+          newRulesToAdd.push({
+            field: asp.name,
+            type: asp.suggestedType || 'static',
+            value: asp.suggestedValue || (asp.values?.[0] || ''),
+            category: asp.group || 'General',
+          });
+          existingFields.add(asp.name.toLowerCase().trim());
+        }
+      }
+
+      if (newRulesToAdd.length === 0) {
+        alert('Is category ke sabhi attributes pehle se table me maujood hain!');
+        return p;
+      }
+
+      return {
+        ...p,
+        rules: [...p.rules, ...newRulesToAdd],
+      };
+    });
+  };
 
   // Update active profile helper
   const updateActiveProfile = (updater: (prev: MasterCategoryProfile) => MasterCategoryProfile) => {
@@ -170,6 +240,7 @@ export default function MasterSpecificsMapping({
       ebayCategoryId: catId,
       ebayCategoryName: found ? found.name : p.ebayCategoryName,
     }));
+    fetchEbayCategoryAspects(catId);
   };
 
   // Toggle Rule Type
@@ -338,13 +409,37 @@ export default function MasterSpecificsMapping({
     );
   }
 
+  const missingRequired = (ebayAspects?.requiredAspects || []).filter(
+    (req: any) => !activeProfile.rules.some((r) => r.field.toLowerCase() === req.name.toLowerCase())
+  );
+
+  const reqCountInTable = activeProfile.rules.filter((r) =>
+    ebayAspects?.requiredAspects?.some((req: any) => req.name.toLowerCase() === r.field.toLowerCase())
+  ).length;
+
+  const recCountInTable = activeProfile.rules.filter((r) =>
+    ebayAspects?.recommendedAspects?.some((rec: any) => rec.name.toLowerCase() === r.field.toLowerCase())
+  ).length;
+
   // Filter rules for active category
   const filteredRules = activeProfile.rules.filter((r) => {
     const matchesSearch =
       r.field.toLowerCase().includes(searchQuery.toLowerCase()) ||
       r.value.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesGroup = selectedGroup === 'All' || r.category === selectedGroup;
-    return matchesSearch && matchesGroup;
+
+    let matchesAspectFilter = true;
+    if (aspectFilter === 'required') {
+      matchesAspectFilter = Boolean(
+        ebayAspects?.requiredAspects?.some((req: any) => req.name.toLowerCase() === r.field.toLowerCase())
+      );
+    } else if (aspectFilter === 'recommended') {
+      matchesAspectFilter = Boolean(
+        ebayAspects?.recommendedAspects?.some((rec: any) => rec.name.toLowerCase() === r.field.toLowerCase())
+      );
+    }
+
+    return matchesSearch && matchesGroup && matchesAspectFilter;
   });
 
   const availableGroups = Array.from(
@@ -516,13 +611,25 @@ export default function MasterSpecificsMapping({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                eBay Jewelry Category ID
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-semibold text-slate-700">
+                  eBay Jewelry Category ID
+                </label>
+                {loadingAspects ? (
+                  <span className="text-[10px] text-blue-600 flex items-center gap-1 font-semibold animate-pulse">
+                    <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Fetching eBay Attributes...
+                  </span>
+                ) : ebayAspects ? (
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-600" />
+                    {ebayAspects.requiredCount} Required, {ebayAspects.recommendedCount} Recommended
+                  </span>
+                ) : null}
+              </div>
               <select
                 value={activeProfile.ebayCategoryId}
                 onChange={(e) => handleEbayCategoryChange(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-900 bg-white"
+                className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs text-slate-900 bg-white font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
               >
                 {EBAY_JEWELRY_CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -642,9 +749,14 @@ export default function MasterSpecificsMapping({
                 <span className="text-[11px] bg-blue-100 text-blue-800 font-mono px-2 py-0.5 rounded-full font-bold">
                   {activeProfile.rules.length} attributes
                 </span>
+                {ebayAspects && (
+                  <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                    Category {ebayAspects.categoryId}
+                  </span>
+                )}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                eBay ko bheje jane wale attributes: 1-click me Static (fixed value) ya Dynamic (Excel column) switch karein.
+                eBay category ke hisab se real-time attributes: 1-click me Static (fixed value) ya Dynamic (Excel column) switch karein.
               </p>
             </div>
 
@@ -675,6 +787,96 @@ export default function MasterSpecificsMapping({
             </div>
           </div>
 
+          {/* Missing Required Aspects Alert */}
+          {missingRequired.length > 0 && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-amber-950 font-bold">eBay Required Attributes Notice:</strong>
+                  <p className="text-amber-900 mt-0.5 text-[11px]">
+                    Is category ({activeProfile.ebayCategoryName || activeProfile.ebayCategoryId}) ke liye eBay ke{' '}
+                    <strong>{missingRequired.length}</strong> required attributes missing hain:{' '}
+                    <span className="font-semibold text-amber-950">
+                      {missingRequired.map((m: any) => m.name).join(', ')}
+                    </span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAutoPopulateEbayAspects(true)}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs shrink-0 transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" /> + Add Missing Required
+              </button>
+            </div>
+          )}
+
+          {/* Category Live Toolbar (Filter by Required / Recommended + Auto Populate) */}
+          <div className="p-3 bg-gradient-to-r from-slate-50 via-blue-50/40 to-slate-50 border border-slate-200 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500 mr-1">Filter eBay:</span>
+              <button
+                type="button"
+                onClick={() => setAspectFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  aspectFilter === 'all'
+                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-300 font-bold'
+                    : 'text-slate-600 hover:bg-white/60'
+                }`}
+              >
+                All ({activeProfile.rules.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAspectFilter('required')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
+                  aspectFilter === 'required'
+                    ? 'bg-red-600 text-white shadow-2xs font-bold'
+                    : 'text-red-700 bg-red-50 hover:bg-red-100 border border-red-200'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                Required by eBay ({reqCountInTable})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAspectFilter('recommended')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
+                  aspectFilter === 'recommended'
+                    ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                    : 'text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                Recommended ({recCountInTable})
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleAutoPopulateEbayAspects(false)}
+                disabled={loadingAspects || !ebayAspects?.allAspects}
+                className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                title="Populate all official eBay Required and Recommended aspects for this category"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                <span>Auto-Load All eBay Attributes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => fetchEbayCategoryAspects(activeProfile.ebayCategoryId)}
+                disabled={loadingAspects}
+                className="p-1.5 text-slate-500 hover:text-slate-800 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition cursor-pointer"
+                title="Refresh attributes live from eBay"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingAspects ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
           {/* Specifics Rules Table */}
           <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
             <table className="w-full text-left border-collapse text-xs">
@@ -692,10 +894,30 @@ export default function MasterSpecificsMapping({
                   const originalIndex = activeProfile.rules.findIndex((r) => r.field === rule.field);
                   const isStatic = rule.type === 'static';
 
+                  // Live eBay aspect metadata
+                  const aspectInfo = ebayAspects?.allAspects?.find(
+                    (a: any) => a.name.toLowerCase() === rule.field.toLowerCase()
+                  );
+                  const isRequired = Boolean(aspectInfo?.isRequired);
+                  const isRecommended = Boolean(!isRequired && aspectInfo?.usage === 'RECOMMENDED');
+                  const datalistId = `dl-${rule.field.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
                   return (
                     <tr key={rule.field} className="hover:bg-slate-50 transition">
                       <td className="py-2 px-3 font-semibold text-slate-800">
-                        {rule.field}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{rule.field}</span>
+                          {isRequired && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-200">
+                              Required
+                            </span>
+                          )}
+                          {isRecommended && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                              Recommended
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="py-2 px-3">
@@ -723,13 +945,23 @@ export default function MasterSpecificsMapping({
 
                       <td className="py-2 px-3">
                         {isStatic ? (
-                          <input
-                            type="text"
-                            value={rule.value}
-                            onChange={(e) => handleUpdateRuleValue(originalIndex, e.target.value)}
-                            className="w-full px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium"
-                            placeholder="Enter static text..."
-                          />
+                          <div>
+                            <input
+                              type="text"
+                              list={datalistId}
+                              value={rule.value}
+                              onChange={(e) => handleUpdateRuleValue(originalIndex, e.target.value)}
+                              className="w-full px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                              placeholder="Enter static text..."
+                            />
+                            {aspectInfo?.values && aspectInfo.values.length > 0 && (
+                              <datalist id={datalistId}>
+                                {aspectInfo.values.map((v: string) => (
+                                  <option key={v} value={v} />
+                                ))}
+                              </datalist>
+                            )}
+                          </div>
                         ) : (
                           <div className="flex items-center gap-1.5">
                             <select
