@@ -3,6 +3,8 @@ import { getStore, saveStoreAsync, ensureStoreAsync, getActiveAccountId } from '
 import { reviseLiveEbayListing, ensureFreshAccessToken } from '@/lib/ebay/live-sync';
 import { isVideoMedia, updateDescriptionImages, deduplicateImageUrls } from '@/lib/ebay/template-engine';
 
+export const maxDuration = 120;
+
 export async function POST(request: Request) {
   try {
     await ensureStoreAsync();
@@ -27,8 +29,14 @@ export async function POST(request: Request) {
     }
 
     const store = getStore();
-    const account = store.accounts.find((a) => a.id === targetAccountId) || store.accounts[0];
-    if (!account) {
+    const defaultAccount =
+      store.accounts.find((a) => a.id === targetAccountId) ||
+      store.accounts.find((a) => a.ebayUsername === 'livuniq') ||
+      store.accounts.find((a) => a.id === getActiveAccountId()) ||
+      store.accounts.find((a) => a.accessToken) ||
+      store.accounts[0];
+
+    if (!defaultAccount) {
       return NextResponse.json(
         { success: false, error: 'No connected eBay account found' },
         { status: 400 }
@@ -36,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     if (pushLiveToEbay) {
-      await ensureFreshAccessToken(account);
+      await ensureFreshAccessToken(defaultAccount);
     }
 
     const results: Array<{
@@ -62,8 +70,14 @@ export async function POST(request: Request) {
 
       // Find listing by ID first, then by SKU (exact or alphanumeric)
       const listing = store.listings.find((l) => {
-        const matchesAccount = !targetAccountId || l.accountId === targetAccountId;
-        if (!matchesAccount) return false;
+        if (targetAccountId && l.accountId !== targetAccountId) {
+          // If sku matches anyway, allow matching so listing is found even if targetAccountId was missing/different
+          const lSku = (l.sku || '').trim().toLowerCase();
+          const lAlphaNum = lSku.replace(/[^a-z0-9]/g, '');
+          if (lSku !== cleanUpdateSku && (alphaNumUpdateSku.length < 3 || lAlphaNum !== alphaNumUpdateSku)) {
+            return false;
+          }
+        }
 
         if (update.listingId && l.id === update.listingId) return true;
 
@@ -84,6 +98,17 @@ export async function POST(request: Request) {
           message: `Listing with SKU "${update.sku}" not found in current store.`,
         });
         continue;
+      }
+
+      // Resolve the precise eBay seller account for this listing
+      const listingAccount =
+        store.accounts.find((a) => a.id === listing.accountId) ||
+        store.accounts.find((a) => a.ebayUsername === 'livuniq') ||
+        store.accounts.find((a) => a.id === targetAccountId) ||
+        defaultAccount;
+
+      if (pushLiveToEbay) {
+        await ensureFreshAccessToken(listingAccount);
       }
 
       const oldImageCount = (listing.images && listing.images.length > 0)
@@ -138,6 +163,7 @@ export async function POST(request: Request) {
       let pushedToEbay = false;
       let ebayMessage = '';
       let videoErrorMsg: string | undefined = undefined;
+      let reviseRes: any = null;
 
       // 2. If pushLiveToEbay is requested and the item is live on eBay (valid numeric Item ID)
       const hasLiveEbayId = Boolean(
@@ -148,17 +174,34 @@ export async function POST(request: Request) {
 
       if (pushLiveToEbay && hasLiveEbayId && listing.ebayListingId) {
         try {
+          // Determine video to pass to eBay:
+          // If update.videoId is explicitly provided, use it.
+          // If update.videoUrl is provided without videoId (e.g. Google Drive scan):
+          // Pass undefined so reviseLiveEbayListing will invoke uploadVideoToEbayMediaApi to upload the binary video to eBay Commerce Media API!
+          let targetVideoId = update.videoId;
+          if (!targetVideoId && update.videoUrl) {
+            const isUrlSame = (listing.videoUrl || '').trim() === (update.videoUrl || '').trim();
+            const hasValidEbayVideoId = listing.videoId && /^[a-f0-9]{25,45}$/i.test(listing.videoId.trim());
+            if (isUrlSame && hasValidEbayVideoId) {
+              targetVideoId = listing.videoId;
+            } else {
+              targetVideoId = undefined; // Forces fresh upload to eBay Media API
+            }
+          }
+
           const revisePayload: {
             images: string[];
             videoUrl?: string;
             videoId?: string;
             description?: string;
             apiKey?: string;
+            sku?: string;
           } = {
             images: validNewImages,
             videoUrl: update.videoUrl || listing.videoUrl,
-            videoId: update.videoId || listing.videoId,
+            videoId: targetVideoId,
             apiKey: apiKey || (store.masterConfig as any).googleDriveApiKey,
+            sku: listing.sku,
           };
 
           // Only send description to eBay if user opted to revise description
@@ -166,8 +209,8 @@ export async function POST(request: Request) {
             revisePayload.description = listing.description;
           }
 
-          const reviseRes = await reviseLiveEbayListing(
-            account,
+          reviseRes = await reviseLiveEbayListing(
+            listingAccount,
             listing.ebayListingId.replace(/^#/, '').trim(),
             revisePayload
           );
@@ -210,7 +253,11 @@ export async function POST(request: Request) {
         success: true,
         pushedToEbay,
         message: pushedToEbay
-          ? `Old ${oldImageCount} images removed, ${validNewImages.length} new images updated & pushed live to eBay!`
+          ? (reviseRes?.videoId
+              ? `Old ${oldImageCount} images removed, ${validNewImages.length} new images updated & Video attached live on eBay!`
+              : (reviseRes?.videoError
+                  ? `Old ${oldImageCount} images removed, ${validNewImages.length} new images updated on eBay (⚠️ Video: ${reviseRes.videoError})`
+                  : `Old ${oldImageCount} images removed, ${validNewImages.length} new images updated & pushed live to eBay!`))
           : `Old ${oldImageCount} images removed, ${validNewImages.length} new images updated locally. ${ebayMessage}`.trim(),
       });
     }

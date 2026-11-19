@@ -454,7 +454,7 @@ export default function BulkImageUpdateModal({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            accountId: activeAccount?.id,
+            accountId: g.matchedListing?.accountId || activeAccount?.id,
             pushLiveToEbay,
             apiKey: gdriveApiKey,
             updates: [singleUpdate],
