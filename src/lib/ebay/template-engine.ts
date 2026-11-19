@@ -748,7 +748,53 @@ function findMatchingDivEnd(html: string, startIndex: number): number {
   return -1;
 }
 
-// Update all images embedded in an HTML description cleanly without altering layout, tables, or icons
+// Check if an image tag or src is a static template asset (logo, banner, guarantee, icon, etc.)
+export function isStaticTemplateImage(imgTag: string, src: string): boolean {
+  const lowerTag = (imgTag || '').toLowerCase();
+  const lowerSrc = (src || '').toLowerCase();
+
+  // 1. Static asset paths
+  if (
+    lowerSrc.includes('pythonanywhere.com/static') ||
+    lowerSrc.includes('/static/diptam/') ||
+    lowerSrc.includes('/static/veronaluxe/') ||
+    lowerSrc.includes('header_banner') ||
+    lowerSrc.includes('logo.png') ||
+    lowerSrc.includes('c1.png') ||
+    lowerSrc.includes('c1m.png') ||
+    lowerSrc.includes('c2.png') ||
+    lowerSrc.includes('c2m.png') ||
+    lowerSrc.startsWith('data:image/')
+  ) {
+    return true;
+  }
+
+  // 2. Class names identifying static headers/footers
+  if (
+    lowerTag.includes('vl-show-desktop') ||
+    lowerTag.includes('vl-show-mobile') ||
+    lowerTag.includes('tr3 op8') ||
+    lowerTag.includes('itemprop="logo"')
+  ) {
+    return true;
+  }
+
+  // 3. Alt texts identifying static assets
+  if (
+    lowerTag.includes('alt="veronaluxe authenticity guarantee"') ||
+    lowerTag.includes('alt="why choose veronaluxe"') ||
+    lowerTag.includes('alt="lovbloom logo"') ||
+    lowerTag.includes('alt="certificate of authenticity"') ||
+    lowerTag.includes('alt="free shipping"') ||
+    lowerTag.includes('alt="elegant gift box"')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+// Update all product images embedded in an HTML description cleanly without altering layout, tables, or template icons
 export function updateDescriptionImages(
   description?: string | null,
   newImages: string[] = [],
@@ -757,38 +803,57 @@ export function updateDescriptionImages(
   if (!description || typeof description !== 'string') return '';
   let updated = description;
 
-  // Clean up any accidentally appended bottom galleries from previous updates
-  updated = updated.replace(/<style[^>]*>[\s\S]*?#gallBlock[\s\S]*?<\/style>\s*<div[^>]*id=["']gallBlock["'][\s\S]*?<\/div>/gi, '');
-  updated = updated.replace(/<div style=["']margin:\s*25px\s*0;?["']>[\s\S]*?<\/div>/gi, '');
-  updated = updated.replace(/<div[^>]*id=["']gallBlock["']>[\s\S]*?<\/div>/gi, '');
-
   const validNew = deduplicateImageUrls(newImages);
   if (validNew.length === 0) return updated;
 
-  // 1. Direct exact and protocol-agnostic replacement of known old product photos
-  const validOld = deduplicateImageUrls(oldImages);
-  for (let i = 0; i < validOld.length; i++) {
-    const oldUrl = validOld[i];
-    if (!oldUrl) continue;
-    const replacement = validNew[i] || validNew[0];
-    updated = updated.split(oldUrl).join(replacement);
-    if (oldUrl.startsWith('https://')) {
-      updated = updated.split(oldUrl.replace('https://', 'http://')).join(replacement);
-    } else if (oldUrl.startsWith('http://')) {
-      updated = updated.split(oldUrl.replace('http://', 'https://')).join(replacement);
-    }
+  // 1. Update VeronaLuxe Gallery (Stage slides & Thumbnails row)
+  if (updated.includes('vl-gallery-stage') || updated.includes('vl-thumbs-row')) {
+    // Replace images inside each vl-slide
+    let slideIdx = 0;
+    updated = updated.replace(
+      /(<div[^>]*class=["'][^"']*vl-slide[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/div>)/gi,
+      (match, prefix, oldSrc, suffix) => {
+        const rep = validNew[slideIdx % validNew.length];
+        slideIdx++;
+        return `${prefix}${rep}${suffix}`;
+      }
+    );
+
+    // Replace images inside each vl-thumb-label
+    let thumbIdx = 0;
+    updated = updated.replace(
+      /(<label[^>]*class=["'][^"']*vl-thumb-label[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/label>)/gi,
+      (match, prefix, oldSrc, suffix) => {
+        const rep = validNew[thumbIdx % validNew.length];
+        thumbIdx++;
+        return `${prefix}${rep}${suffix}`;
+      }
+    );
   }
 
-  // 2. eBay image hash / signature replacement:
-  // ONLY matches img src that contain the specific eBay hash of an old product photo!
-  // This guarantees template icons, banner graphics, tables, and borders are 100% UNTOUCHED!
-  for (let i = 0; i < validOld.length; i++) {
-    const oldUrl = validOld[i];
-    const oldHash = extractEbayImageHash(oldUrl);
-    if (!oldHash) continue;
-    const replacement = validNew[i] || validNew[0];
-    const hashRegex = new RegExp(`(src=["'])([^"']*${oldHash}[^"']*)(["'])`, 'gi');
-    updated = updated.replace(hashRegex, `$1${replacement}$3`);
+  // 2. Update DIPTAM / Livuniq #gallBlock Gallery
+  if (updated.includes('gallBlock') || updated.includes('lrgImg') || updated.includes('imgSmIn')) {
+    // Replace large images (.lrgImg or #imgblock*)
+    let lrgIdx = 0;
+    updated = updated.replace(
+      /(<div[^>]*class=["'][^"']*lrgImg[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/div>)/gi,
+      (match, prefix, oldSrc, suffix) => {
+        const rep = validNew[lrgIdx % validNew.length];
+        lrgIdx++;
+        return `${prefix}${rep}${suffix}`;
+      }
+    );
+
+    // Replace thumbnails (.imgSmIn)
+    let thumbDiptamIdx = 0;
+    updated = updated.replace(
+      /(<div[^>]*class=["']imgSmIn["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/div>)/gi,
+      (m, p, oldSrc, s) => {
+        const rep = validNew[thumbDiptamIdx % validNew.length];
+        thumbDiptamIdx++;
+        return `${p}${rep}${s}`;
+      }
+    );
   }
 
   // 3. Template placeholders replacement
@@ -799,6 +864,46 @@ export function updateDescriptionImages(
     updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), rep);
     updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), rep);
   }
+
+  // 4. Direct exact and protocol-agnostic replacement of known old product photos
+  const validOld = deduplicateImageUrls(oldImages);
+  for (let i = 0; i < validOld.length; i++) {
+    const oldUrl = validOld[i];
+    if (!oldUrl || isStaticTemplateImage('', oldUrl)) continue;
+    const replacement = validNew[i] || validNew[0];
+    updated = updated.split(oldUrl).join(replacement);
+    if (oldUrl.startsWith('https://')) {
+      updated = updated.split(oldUrl.replace('https://', 'http://')).join(replacement);
+    } else if (oldUrl.startsWith('http://')) {
+      updated = updated.split(oldUrl.replace('http://', 'https://')).join(replacement);
+    }
+  }
+
+  // 4b. eBay image hash / signature replacement:
+  // ONLY matches img src that contain the specific eBay hash of an old product photo!
+  for (let i = 0; i < validOld.length; i++) {
+    const oldUrl = validOld[i];
+    if (isStaticTemplateImage('', oldUrl)) continue;
+    const oldHash = extractEbayImageHash(oldUrl);
+    if (!oldHash) continue;
+    const replacement = validNew[i] || validNew[0];
+    const hashRegex = new RegExp(`(src=["'])([^"']*${oldHash}[^"']*)(["'])`, 'gi');
+    updated = updated.replace(hashRegex, `$1${replacement}$3`);
+  }
+
+  // 5. Fallback: If any non-static product <img> tags remain that still have old image sources, replace them
+  let genericProductIdx = 0;
+  updated = updated.replace(/<img\b([^>]*\bsrc=["'])([^"']+)(["'][^>]*)>/gi, (fullTag, prefix, oldSrc, suffix) => {
+    if (isStaticTemplateImage(fullTag, oldSrc)) {
+      return fullTag; // Preserve static template assets 100%
+    }
+    if (validNew.includes(oldSrc)) {
+      return fullTag; // Already updated
+    }
+    const rep = validNew[genericProductIdx % validNew.length];
+    genericProductIdx++;
+    return `<img${prefix}${rep}${suffix}>`;
+  });
 
   return sanitizeGalleryHtml(updated);
 }

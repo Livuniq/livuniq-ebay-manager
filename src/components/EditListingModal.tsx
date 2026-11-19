@@ -411,14 +411,22 @@ export default function EditListingModal({
       if (isVideoMedia(url)) {
         setVideoUrl(url);
       } else {
-        setImages((prev) => [...prev, url]);
+        const nextImgs = [...images, url];
+        setImages(nextImgs);
+        if (description) {
+          setDescription(updateDescriptionImages(description, nextImgs, images));
+        }
       }
       setImageUrlInput('');
     }
   };
 
   const handleRemovePhoto = (index: number) => {
-    setImages((prev) => prev.filter((_, idx) => idx !== index));
+    const nextImgs = images.filter((_, idx) => idx !== index);
+    setImages(nextImgs);
+    if (description) {
+      setDescription(updateDescriptionImages(description, nextImgs, images));
+    }
   };
 
   const updateSpecific = (key: string, value: string) => {
@@ -456,6 +464,8 @@ export default function EditListingModal({
         }
       }
 
+      const finalDesc = description ? updateDescriptionImages(description, images, listing?.images) : description;
+
       const res = await fetch('/api/ebay/listings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -469,7 +479,7 @@ export default function EditListingModal({
           images,
           videoUrl,
           videoId,
-          description,
+          description: finalDesc,
           itemSpecifics: cleanSpecifics,
           conditionDescription: sellerNotes,
           categoryId,

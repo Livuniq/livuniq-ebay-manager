@@ -162,10 +162,10 @@ export async function POST(request: Request) {
         listing.videoId = update.videoId;
       }
 
-      const shouldUpdateDesc = Boolean(update.updateDescription ?? body.updateDescription);
+      const shouldUpdateDesc = update.updateDescription !== false && body.updateDescription !== false;
 
-      // 1b. Update HTML Description ONLY if explicitly requested by user (keeps custom templates 100% safe by default)
-      if (shouldUpdateDesc && listing.description) {
+      // 1b. Update HTML Description product gallery images cleanly (keeps custom templates, tables, and IGI badges 100% safe)
+      if (shouldUpdateDesc && listing.description && validNewImages.length > 0) {
         listing.description = updateDescriptionImages(listing.description, validNewImages, oldImages);
       }
 

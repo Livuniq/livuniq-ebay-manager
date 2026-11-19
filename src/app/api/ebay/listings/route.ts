@@ -14,7 +14,7 @@ import {
 } from '@/lib/ebay/server-store';
 import { reviseLiveEbayListing, addLiveEbayListing, endLiveEbayListing } from '@/lib/ebay/live-sync';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
-import { deduplicateImageUrls } from '@/lib/ebay/template-engine';
+import { deduplicateImageUrls, updateDescriptionImages } from '@/lib/ebay/template-engine';
 
 export const maxDuration = 120;
 
@@ -190,6 +190,14 @@ export async function PATCH(request: Request) {
     const existingListing = allListings.find((l) => l.id === id);
     if (!existingListing) {
       return NextResponse.json({ success: false, error: 'Listing not found' }, { status: 404 });
+    }
+
+    // Auto-detect & update product gallery photos inside HTML description cleanly without altering layout, tables, or icons
+    if (updates.images && Array.isArray(updates.images) && updates.images.length > 0) {
+      const descToUpdate = updates.description || existingListing.description;
+      if (descToUpdate) {
+        updates.description = updateDescriptionImages(descToUpdate, updates.images, existingListing.images);
+      }
     }
 
     // Push to eBay if explicitly requested OR if updating schedule time on an existing eBay listing

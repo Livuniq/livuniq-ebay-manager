@@ -120,7 +120,7 @@ export default function BulkImageUpdateModal({
   const [skuGroups, setSkuGroups] = useState<SkuImageGroup[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [pushLiveToEbay, setPushLiveToEbay] = useState(true);
-  const [updateHtmlDescription, setUpdateHtmlDescription] = useState(false);
+  const [updateHtmlDescription, setUpdateHtmlDescription] = useState(true);
   const [applyingUpdates, setApplyingUpdates] = useState(false);
   const [updatingProgress, setUpdatingProgress] = useState({ current: 0, total: 0, sku: '' });
   const [errorMsg, setErrorMsg] = useState('');
@@ -941,10 +941,10 @@ export default function BulkImageUpdateModal({
                 />
                 <label htmlFor="updateHtmlDescription" className="text-xs text-slate-700 cursor-pointer">
                   <span className="font-bold text-slate-900 block">
-                    Also update photos inside listing HTML description
+                    Auto-detect & update product photos inside listing HTML description
                   </span>
                   <span className="text-slate-500 text-[11px] block mt-0.5">
-                    <strong>Default: Unchecked (Safe).</strong> Agar uncheck rakhenge, toh aapka custom luxury HTML layout, tables aur IGI badge 100% untouched aur safe rahenge — sirf eBay listing gallery photos aur video change hongi. Check tabhi karein jab aap HTML ke andar ki photos bhi replace karna chahte hon.
+                    <strong>Smart Product Photo Detection Active:</strong> HTML ke andar sirf product gallery images detect karke update hongi — aapka logo, header banners, authenticity badges aur IGI tables 100% untouched aur safe rahenge.
                   </span>
                 </label>
               </div>
