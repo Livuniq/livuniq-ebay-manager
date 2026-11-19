@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
+import { resolveWorkingGeminiEndpoint } from '@/lib/ebay/gemini-ai';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const apiKey = (body.apiKey || '').trim();
+    const apiKey = (body.apiKey || body.geminiApiKey || '').trim();
 
     if (!apiKey) {
       return NextResponse.json(
@@ -12,37 +13,35 @@ export async function POST(request: Request) {
       );
     }
 
-    // Test Gemini 1.5 Flash endpoint with a fast greeting
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: 'Hello! Respond with: Gemini AI is active and ready!' }],
-          },
-        ],
-        generationConfig: {
-          maxOutputTokens: 20,
-        },
-      }),
-    });
+    const result = await resolveWorkingGeminiEndpoint(apiKey);
 
-    if (res.ok) {
+    if (result.success && result.model) {
       return NextResponse.json({
         success: true,
-        message: '✓ Google Gemini API Key 100% valid aur active hai! Gemini 1.5 Flash customer support ke liye ready hai.',
+        message: `✓ Google Gemini API Key 100% active aur valid hai! Model "${result.model.modelName}" (${result.model.apiVersion}) customer concierge ke liye ready hai.`,
+        model: result.model,
+        availableModels: result.availableModels,
       });
     }
 
-    const errData = await res.json().catch(() => ({}));
-    const rawMsg = errData.error?.message || res.statusText || 'Unknown error';
+    const rawMsg = result.error || 'Unknown error occurred';
 
-    if (res.status === 400 || rawMsg.toLowerCase().includes('api key not valid') || rawMsg.toLowerCase().includes('invalid')) {
+    if (
+      rawMsg.toLowerCase().includes('api key not valid') ||
+      rawMsg.toLowerCase().includes('invalid') ||
+      rawMsg.toLowerCase().includes('api_key_invalid')
+    ) {
       return NextResponse.json({
         success: false,
-        error: 'Gemini API key valid nahi hai. Kripya Google AI Studio (aistudio.google.com) se nayi API key copy karke dalein.',
+        error: 'Gemini API key valid nahi hai. Kripya Google AI Studio (aistudio.google.com/app/apikey) se nayi API key copy karke dalein.',
+        rawError: rawMsg,
+      });
+    }
+
+    if (rawMsg.toLowerCase().includes('generative language api has not been used') || rawMsg.toLowerCase().includes('disabled')) {
+      return NextResponse.json({
+        success: false,
+        error: `Google Cloud Project me Generative Language API disabled hai: ${rawMsg}`,
         rawError: rawMsg,
       });
     }
@@ -51,6 +50,7 @@ export async function POST(request: Request) {
       success: false,
       error: `Gemini API test error: ${rawMsg}`,
       rawError: rawMsg,
+      availableModels: result.availableModels,
     });
   } catch (err: any) {
     return NextResponse.json(
