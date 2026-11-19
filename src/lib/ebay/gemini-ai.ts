@@ -249,7 +249,7 @@ ${chatHistory.map((m) => `${m.senderRole === 'BUYER' ? buyerUsername : storeName
 
   const defaultStorePolicy = `
 STORE POLICIES & KNOWLEDGE BASE:
-- Custom ring sizing, metal upgrades, and modifications are verified with our master workshop team before confirming.
+- Complimentary custom ring sizing available for all US sizes from 4 to 11 (including half & quarter sizes). 100% Free customization!
 - Standard handling & craft time: 8-10 business days (handcrafted to perfection).
 - Tracked insured priority shipping with signature confirmation.
 - 30-Day Hassle-Free Returns & Money-Back Guarantee.
@@ -296,15 +296,16 @@ CRITICAL GROUNDING RULES (CHECK BOTH ITEM SPECIFICATIONS & THE FULL LISTING DESC
    - If IGI is NOT mentioned anywhere, state that it comes with our studio Certificate of Authenticity.
 3. SOLID GOLD vs PLATED:
    - Check Metal Purity in ITEM SPECIFICATIONS or DESCRIPTION (e.g. 14K, 10K, 18K). Confirm directly: "It's crafted in solid [Karat] gold, never plated or filled."
-4. CUSTOMIZATIONS & SPECIAL REQUESTS (STRICT RULE — NEVER TELL BUYER TO BLINDLY PLACE ORDER):
-   - Whenever a buyer asks for ANY customization, custom size, modification, or requirement that differs from the active listing (e.g. 18K gold, white/rose gold, custom ring size like 8.5, different stone shape, band width, engraving, or rush handling):
-   - NEVER tell the buyer to "place your order", "go ahead and buy it", or "leave a note at checkout"!
-   - Instead, acknowledge their request warmly and let them know our team is reviewing the details with the workshop and will reply back shortly:
-     * For Ring Sizing / Color / Engraving Customization:
-       "Hi ${cleanFirstName}! We'd love to help with this custom request! I'm checking the exact details with our workshop team right now to make sure we can tailor it perfectly for you, and we'll follow up with you shortly with full confirmation."
-     * For Karat Upgrade (18K, Platinum) or Different Stones (Price Upgrades):
-       "Hi ${cleanFirstName}! Yes, we can definitely custom craft this in 18K [color] gold! Because 18K has higher gold purity than the listed 14K, there is an upgrade price difference. I'm checking the exact details with our production team right now and will get back to you shortly with a custom quote!"
-5. DISCOUNTS / OFFERS:
+4. RING SIZING (100% COMPLIMENTARY & FREE — RANGE: US 4 TO 11):
+   - Ring sizing between US 4 and 11 (including half and quarter sizes like 4.5, 6.25, 7.5, 8.5, 10.5) is 100% FREE customization!
+   - When a buyer asks for any ring size in the US 4 to 11 range:
+     * Confirm enthusiastically: "Hi ${cleanFirstName}! Yes, absolutely—we offer complimentary custom ring sizing for any size from US 4 to 11! Just drop a note with your required ring size in the checkout notes when you place your order, and our bench jewelers will handcraft it for you."
+   - If they ask for a size outside US 4-11, say our workshop team will verify if it can be crafted and reply back shortly.
+5. MATERIAL & KARAT UPGRADES (10K -> 14K -> 18K / PLATINUM) & CUSTOM REDESIGNS (PRICE INCREASES):
+   - If the buyer asks for a higher karat (e.g. 18K gold on a 14K listing), Platinum, larger diamond, or custom structural changes:
+   - NEVER tell the buyer to just place the order at the current price!
+   - Respond warmly and professionally: "Yes, we can definitely custom craft this in 18K [color] gold for you! Because 18K has higher gold purity than the listed 14K, there is an upgrade price difference. I'm checking the exact details with our production team right now and will get back to you shortly with a custom quote!"
+6. DISCOUNTS / OFFERS:
    - Be friendly and honest: explain pricing is already direct-from-workshop wholesale, but offer a bundle discount if purchasing multiple items.
 
 Output ONLY the exact human message to send to the buyer.`;
