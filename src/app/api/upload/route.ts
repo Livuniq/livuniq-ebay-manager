@@ -150,8 +150,8 @@ export async function POST(request: Request) {
         try {
           const videoBaseUrl =
             masterConfig.environment === 'sandbox'
-              ? 'https://api.sandbox.ebay.com/commerce/media/v1_beta/video'
-              : 'https://api.ebay.com/commerce/media/v1_beta/video';
+              ? 'https://api.sandbox.ebay.com/commerce/media/v1/video'
+              : 'https://api.ebay.com/commerce/media/v1/video';
 
           console.log('Registering video with eBay Media API:', cleanName, activeBuffer.length, 'bytes');
           const createRes = await fetch(videoBaseUrl, {

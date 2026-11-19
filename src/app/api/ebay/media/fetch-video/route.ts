@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getAccounts, getActiveAccountId, ensureStoreAsync, getStore } from '@/lib/ebay/server-store';
-import { ensureFreshAccessToken, uploadVideoToEbayMediaApi } from '@/lib/ebay/live-sync';
+import { getAccounts, getActiveAccountId, ensureStoreAsync, getStore, updateListing } from '@/lib/ebay/server-store';
+import { ensureFreshAccessToken, uploadVideoToEbayMediaApi, reviseLiveEbayListing } from '@/lib/ebay/live-sync';
 import { extractGoogleDriveId } from '@/lib/ebay/google-drive-scanner';
 
 export const maxDuration = 120;
@@ -21,8 +21,23 @@ export async function POST(request: Request) {
     const cleanUrl = videoUrl.trim();
     const store = getStore();
     const accounts = getAccounts();
+
+    let targetAccountId = accountId;
+    let targetListing = null;
+
+    if (sku) {
+      const cleanSku = sku.trim().toLowerCase();
+      targetListing = (store.listings || []).find(
+        (l) => (l.sku || '').trim().toLowerCase() === cleanSku
+      );
+      if (targetListing?.accountId) {
+        targetAccountId = targetListing.accountId;
+      }
+    }
+
     const account =
-      accounts.find((a) => a.id === accountId) ||
+      accounts.find((a) => a.id === targetAccountId) ||
+      accounts.find((a) => a.ebayUsername === 'livuniq') ||
       accounts.find((a) => a.id === getActiveAccountId()) ||
       accounts.find((a) => a.accessToken);
 
@@ -32,6 +47,8 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+
+    console.log(`[Fetch Video API] Target seller account: ${account.ebayUsername} (${account.id}), SKU: ${sku || 'N/A'}`);
 
     await ensureFreshAccessToken(account);
 
@@ -54,11 +71,41 @@ export async function POST(request: Request) {
     );
 
     if (uploadRes.success && uploadRes.videoId) {
+      let liveRevised = false;
+      let liveMessage = '';
+
+      if (targetListing) {
+        updateListing(targetListing.id, {
+          videoId: uploadRes.videoId,
+          videoUrl: cleanUrl,
+        });
+
+        if (targetListing.ebayListingId && /^\d+$/.test(targetListing.ebayListingId)) {
+          console.log(`[Fetch Video API] Auto-attaching videoId ${uploadRes.videoId} to live eBay listing ${targetListing.ebayListingId}...`);
+          try {
+            const reviseRes = await reviseLiveEbayListing(account, targetListing.ebayListingId, {
+              videoId: uploadRes.videoId,
+              videoUrl: cleanUrl,
+            });
+            liveRevised = reviseRes.success;
+            liveMessage = reviseRes.message;
+            console.log('[Fetch Video API] Revise result:', reviseRes);
+          } catch (rErr: any) {
+            console.warn('[Fetch Video API] Auto-revise exception:', rErr);
+            liveMessage = rErr.message;
+          }
+        }
+      }
+
       return NextResponse.json({
         success: true,
         videoId: uploadRes.videoId,
         gDriveId: gDriveId || undefined,
-        message: 'Video successfully fetched and registered with eBay Media API!',
+        liveRevised,
+        liveMessage,
+        message: liveRevised
+          ? 'Video successfully uploaded and linked live to your eBay listing!'
+          : 'Video successfully fetched and registered with eBay Media API!',
       });
     } else {
       return NextResponse.json(

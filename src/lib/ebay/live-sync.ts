@@ -17,10 +17,23 @@ function cleanXmlUrl(url: string): string {
 }
 
 export function isSandboxEnv(masterConfig: any): boolean {
+  if (masterConfig?.environment === 'production') return false;
+  if (masterConfig?.environment === 'sandbox') return true;
   return Boolean(
     masterConfig?.masterAppId?.includes('-SBX-') ||
     masterConfig?.environment === 'sandbox'
   );
+}
+
+export function isAccountSandbox(account?: ConnectedAccount, masterConfig?: any): boolean {
+  const accAny = account as any;
+  if (accAny?.environment === 'production') return false;
+  if (accAny?.environment === 'sandbox') return true;
+  if (account?.ebayUsername?.toLowerCase().startsWith('testuser_')) return true;
+  if (account?.ebayUsername?.toLowerCase() === 'livuniq') return false;
+  if (masterConfig?.environment === 'production') return false;
+  if (masterConfig?.environment === 'sandbox') return true;
+  return Boolean(masterConfig?.masterAppId?.includes('-SBX-'));
 }
 
 // Automatically refresh user access token using refreshToken when expired
@@ -744,52 +757,78 @@ export async function uploadVideoToEbayMediaApi(
     }
 
     const masterConfig = store.masterConfig;
-    const videoBaseUrl = isSandboxEnv(masterConfig)
-      ? 'https://api.sandbox.ebay.com/commerce/media/v1_beta/video'
-      : 'https://api.ebay.com/commerce/media/v1_beta/video';
+    const isSandbox = isAccountSandbox(account, masterConfig);
+    const candidateEndpoints = isSandbox
+      ? [
+          'https://api.sandbox.ebay.com/commerce/media/v1/video',
+          'https://api.sandbox.ebay.com/commerce/media/v1_beta/video',
+          'https://apim.sandbox.ebay.com/commerce/media/v1/video',
+        ]
+      : [
+          'https://api.ebay.com/commerce/media/v1/video',
+          'https://api.ebay.com/commerce/media/v1_beta/video',
+          'https://apim.ebay.com/commerce/media/v1/video',
+        ];
 
     const cleanTitle = fileName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50) || 'Product_Video';
-
-    console.log(`[eBay Media API] Registering video metadata: ${cleanTitle}, size: ${videoBuffer.length} bytes`);
-
-    // Step 1: Create Video Metadata
-    const createRes = await fetch(videoBaseUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify({
-        title: cleanTitle,
-        size: videoBuffer.length,
-        classification: ['ITEM'],
-        description: 'Product Diamond Video',
-      }),
-    });
+    console.log(`[eBay Media API] Registering video metadata: ${cleanTitle}, size: ${videoBuffer.length} bytes for seller: ${account.ebayUsername} (isSandbox: ${isSandbox})`);
 
     let videoId: string | undefined = undefined;
-    const locationHeader = createRes.headers.get('location');
-    if (locationHeader) {
-      videoId = locationHeader.split('/').pop()?.trim();
-    }
-    if (!videoId) {
+    let successfulBaseUrl = candidateEndpoints[0];
+    let lastCreateError = '';
+
+    for (const endpoint of candidateEndpoints) {
       try {
-        const createJson = await createRes.clone().json();
-        videoId = createJson.videoId || createJson.id;
-      } catch {}
+        console.log(`[eBay Media API] Calling createVideo at: ${endpoint}...`);
+        const createRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            title: cleanTitle,
+            size: videoBuffer.length,
+            classification: ['ITEM'],
+            description: 'Product Diamond Video',
+          }),
+        });
+
+        const locationHeader = createRes.headers.get('location');
+        if (locationHeader) {
+          videoId = locationHeader.split('/').pop()?.trim();
+        }
+        if (!videoId) {
+          try {
+            const createJson = await createRes.clone().json();
+            videoId = createJson.videoId || createJson.id;
+          } catch {}
+        }
+
+        if (createRes.status === 201 && videoId) {
+          successfulBaseUrl = endpoint;
+          console.log(`[eBay Media API] createVideo succeeded on ${endpoint}! VideoID: ${videoId}`);
+          break;
+        } else {
+          const errText = await createRes.text();
+          lastCreateError = `HTTP ${createRes.status}: ${errText.slice(0, 200)}`;
+          console.warn(`[eBay Media API] createVideo non-201 at ${endpoint}:`, lastCreateError);
+        }
+      } catch (endErr: any) {
+        lastCreateError = endErr.message;
+        console.warn(`[eBay Media API] createVideo exception at ${endpoint}:`, endErr.message);
+      }
     }
 
     if (!videoId) {
-      const errText = await createRes.text();
-      console.warn('[eBay Media API] createVideo failed:', createRes.status, errText);
-      return { success: false, error: `eBay createVideo returned HTTP ${createRes.status}: ${errText.slice(0, 150)}` };
+      return { success: false, error: `eBay createVideo failed: ${lastCreateError || 'unreachable'}` };
     }
 
-    console.log(`[eBay Media API] Uploading binary video content to eBay for videoId: ${videoId}`);
+    console.log(`[eBay Media API] Uploading binary video content to eBay for videoId: ${videoId} at ${successfulBaseUrl}/${videoId}/upload`);
 
     // Step 2: Upload Binary Video Payload
-    const uploadRes = await fetch(`${videoBaseUrl}/${videoId}/upload`, {
+    const uploadRes = await fetch(`${successfulBaseUrl}/${videoId}/upload`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -806,7 +845,7 @@ export async function uploadVideoToEbayMediaApi(
     } else {
       const errTxt = await uploadRes.text();
       console.warn(`[eBay Media API] Video upload non-2xx (HTTP ${uploadRes.status}):`, errTxt);
-      return { success: false, error: `eBay video upload returned HTTP ${uploadRes.status}: ${errTxt.slice(0, 150)}` };
+      return { success: false, error: `eBay video upload returned HTTP ${uploadRes.status}: ${errTxt.slice(0, 200)}` };
     }
   } catch (err: any) {
     console.error('[eBay Media API] Video upload error:', err);
