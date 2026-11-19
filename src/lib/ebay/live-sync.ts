@@ -760,14 +760,14 @@ export async function uploadVideoToEbayMediaApi(
     const isSandbox = isAccountSandbox(account, masterConfig);
     const candidateEndpoints = isSandbox
       ? [
-          'https://api.sandbox.ebay.com/commerce/media/v1/video',
+          'https://apim.sandbox.ebay.com/commerce/media/v1_beta/video',
           'https://api.sandbox.ebay.com/commerce/media/v1_beta/video',
-          'https://apim.sandbox.ebay.com/commerce/media/v1/video',
+          'https://api.sandbox.ebay.com/commerce/media/v1/video',
         ]
       : [
-          'https://api.ebay.com/commerce/media/v1/video',
+          'https://apim.ebay.com/commerce/media/v1_beta/video',
           'https://api.ebay.com/commerce/media/v1_beta/video',
-          'https://apim.ebay.com/commerce/media/v1/video',
+          'https://api.ebay.com/commerce/media/v1/video',
         ];
 
     const cleanTitle = fileName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50) || 'Product_Video';
