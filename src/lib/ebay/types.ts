@@ -25,6 +25,7 @@ export interface ConnectedAccount {
   templates?: any[];
   specificsMapping?: any[];
   categoryProfiles?: any[];
+  deletedThreadIds?: string[];
 }
 
 export interface EbayListing {

@@ -925,12 +925,57 @@ export default function Home() {
     }
   };
 
-  // Auto-sync live messages when opening the messages tab
+  // Load messages when opening the messages tab without forcing a deep live re-pull
   useEffect(() => {
-    if (activeTab === 'messages' && activeAccount?.accessToken) {
-      handleSyncMessages(true, 365);
+    if (activeTab === 'messages') {
+      handleSyncMessages(false);
     }
   }, [activeTab, activeAccountId]);
+
+  // Delete single message thread
+  const handleDeleteThread = async (threadId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this message thread from your dashboard?')) {
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/ebay/messages?threadId=${encodeURIComponent(threadId)}&accountId=${encodeURIComponent(activeAccountId || '')}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json();
+      if (data.success && Array.isArray(data.threads)) {
+        setThreads(data.threads);
+        if (selectedThreadId === threadId) {
+          setSelectedThreadId(data.threads.length > 0 ? data.threads[0].id : null);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete message thread:', err);
+    }
+  };
+
+  // Clear all messages from inbox
+  const handleClearAllMessages = async () => {
+    if (!window.confirm('Are you sure you want to clear all messages from your dashboard inbox?')) {
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/ebay/messages?clearAll=true&accountId=${encodeURIComponent(activeAccountId || '')}`,
+        { method: 'DELETE' }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setThreads([]);
+        setSelectedThreadId(null);
+        setMsgSyncStatus('✅ All messages cleared from dashboard.');
+        setTimeout(() => setMsgSyncStatus(null), 4000);
+      }
+    } catch (err) {
+      console.error('Failed to clear messages:', err);
+    }
+  };
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -2133,6 +2178,15 @@ export default function Home() {
                     >
                       <span>{isSimulatingMessage ? 'Creating...' : '+ Test'}</span>
                     </button>
+                    <button
+                      onClick={handleClearAllMessages}
+                      disabled={threads.length === 0}
+                      className="text-[11px] font-medium bg-white hover:bg-red-50 text-red-600 hover:text-red-700 border border-slate-200 hover:border-red-300 px-2 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Clear all messages from dashboard inbox"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Clear All</span>
+                    </button>
                   </div>
                 </div>
 
@@ -2189,9 +2243,18 @@ export default function Home() {
                                 )}
                                 <span className="truncate">{thr.buyerUsername}</span>
                               </span>
-                              <span className="text-[10px] text-slate-400 flex-shrink-0 ml-1">
-                                {new Date(thr.lastUpdated).toLocaleDateString()}
-                              </span>
+                              <div className="flex items-center space-x-1 flex-shrink-0 ml-1">
+                                <span className="text-[10px] text-slate-400">
+                                  {new Date(thr.lastUpdated).toLocaleDateString()}
+                                </span>
+                                <button
+                                  onClick={(e) => handleDeleteThread(thr.id, e)}
+                                  className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                                  title="Delete conversation"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
                             </div>
                             {thrListing?.sku && (
                               <div className="text-[10px] font-semibold text-indigo-600 mb-0.5 flex items-center gap-1">
@@ -2237,6 +2300,14 @@ export default function Home() {
                             </div>
                             <div className="text-xs text-slate-500 mt-1 flex items-center space-x-2">
                               <span>Buyer: <strong className="text-slate-700">{activeThread.buyerName}</strong> ({activeThread.buyerUsername})</span>
+                              <button
+                                onClick={() => handleDeleteThread(activeThread.id)}
+                                className="text-[11px] text-red-500 hover:text-red-700 hover:underline flex items-center gap-1 ml-2 transition cursor-pointer"
+                                title="Delete this conversation"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete Thread</span>
+                              </button>
                             </div>
                           </div>
 

@@ -566,6 +566,54 @@ export function markThreadAsRead(threadId: string): boolean {
   return true;
 }
 
+export function deleteMessageThread(threadId: string, accountId?: string): boolean {
+  const store = getStore();
+  const beforeCount = store.threads.length;
+  store.threads = store.threads.filter((t) => t.id !== threadId);
+
+  // Track in account's deletedThreadIds so live sync does not re-pull it
+  const targetAccountId = accountId || store.activeAccountId;
+  const acc = store.accounts.find((a) => a.id === targetAccountId);
+  if (acc) {
+    if (!acc.deletedThreadIds) acc.deletedThreadIds = [];
+    if (!acc.deletedThreadIds.includes(threadId)) {
+      acc.deletedThreadIds.push(threadId);
+    }
+  }
+
+  saveStore(store);
+  return store.threads.length !== beforeCount;
+}
+
+export function clearAllMessageThreads(accountId?: string): number {
+  const store = getStore();
+  const targetAccountId = accountId || store.activeAccountId;
+  const beforeCount = store.threads.length;
+
+  const acc = store.accounts.find((a) => a.id === targetAccountId);
+  if (acc) {
+    if (!acc.deletedThreadIds) acc.deletedThreadIds = [];
+    const idsToClear = store.threads
+      .filter((t) => !targetAccountId || t.accountId === targetAccountId)
+      .map((t) => t.id);
+    for (const id of idsToClear) {
+      if (!acc.deletedThreadIds.includes(id)) {
+        acc.deletedThreadIds.push(id);
+      }
+    }
+  }
+
+  if (targetAccountId) {
+    store.threads = store.threads.filter((t) => t.accountId !== targetAccountId);
+  } else {
+    store.threads = [];
+  }
+
+  const removed = beforeCount - store.threads.length;
+  saveStore(store);
+  return removed;
+}
+
 // Description HTML Template operations (per-account or global)
 export function getTemplates(accountId?: string): DescriptionTemplate[] {
   const store = getStore();

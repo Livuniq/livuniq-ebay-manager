@@ -1833,6 +1833,11 @@ export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack =
           const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
           const thrId = `thr-ebay-${account.id}-${senderId.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
 
+          // If this thread was deleted by the user, do not resurrect it
+          if (account.deletedThreadIds?.includes(thrId)) {
+            continue;
+          }
+
           if (newThreadsMap.has(thrId)) {
             const existingThr = newThreadsMap.get(thrId)!;
             existingThr.messages = mergeThreadMessages(existingThr.messages, parsedHistory);
@@ -1952,6 +1957,11 @@ export async function syncLiveEbayMessages(account: ConnectedAccount, daysBack =
 
         const cleanSubject = subject.replace(/^(?:re|fwd):\s*/i, '').trim();
         const thrId = `thr-ebay-${account.id}-${sender.toLowerCase()}${itemId ? `-${itemId}` : ''}`;
+
+        // If this thread was deleted by the user, do not resurrect it
+        if (account.deletedThreadIds?.includes(thrId)) {
+          continue;
+        }
 
         if (newThreadsMap.has(thrId)) {
           const existingThr = newThreadsMap.get(thrId)!;

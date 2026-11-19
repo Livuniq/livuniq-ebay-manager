@@ -1,5 +1,16 @@
 import { NextResponse } from 'next/server';
-import { getMessageThreads, sendReply, markThreadAsRead, getStore, saveStore, getActiveAccountId, ensureStoreAsync, getAccountForEnvironment } from '@/lib/ebay/server-store';
+import {
+  getMessageThreads,
+  sendReply,
+  markThreadAsRead,
+  deleteMessageThread,
+  clearAllMessageThreads,
+  getStore,
+  saveStore,
+  getActiveAccountId,
+  ensureStoreAsync,
+  getAccountForEnvironment,
+} from '@/lib/ebay/server-store';
 import { syncLiveEbayMessages, sendLiveEbayReply } from '@/lib/ebay/live-sync';
 
 export async function GET(request: Request) {
@@ -179,6 +190,46 @@ export async function PATCH(request: Request) {
 
     const marked = markThreadAsRead(threadId);
     return NextResponse.json({ success: marked });
+  } catch (err) {
+    return NextResponse.json(
+      { success: false, error: (err as Error).message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    await ensureStoreAsync();
+    const { searchParams } = new URL(request.url);
+    const threadId = searchParams.get('threadId');
+    const clearAll = searchParams.get('clearAll') === 'true';
+    const accountId = searchParams.get('accountId') || getActiveAccountId();
+
+    if (clearAll) {
+      const removedCount = clearAllMessageThreads(accountId);
+      const remainingThreads = getMessageThreads(accountId);
+      return NextResponse.json({
+        success: true,
+        message: `Cleared all ${removedCount} messages from dashboard inbox`,
+        threads: remainingThreads,
+      });
+    }
+
+    if (!threadId) {
+      return NextResponse.json(
+        { success: false, error: 'threadId or clearAll=true is required' },
+        { status: 400 }
+      );
+    }
+
+    const deleted = deleteMessageThread(threadId, accountId);
+    const remainingThreads = getMessageThreads(accountId);
+    return NextResponse.json({
+      success: true,
+      deleted,
+      threads: remainingThreads,
+    });
   } catch (err) {
     return NextResponse.json(
       { success: false, error: (err as Error).message },
