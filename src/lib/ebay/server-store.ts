@@ -61,6 +61,12 @@ export async function ensureStoreAsync(): Promise<AppStore> {
               isLiveConfigured: true,
             };
           }
+          if (!dbData.masterConfig?.googleDriveApiKey && process.env.GOOGLE_DRIVE_API_KEY) {
+            dbData.masterConfig = {
+              ...dbData.masterConfig,
+              googleDriveApiKey: process.env.GOOGLE_DRIVE_API_KEY,
+            };
+          }
           memoryStore = dbData as AppStore;
           normalizeAccountEnvironments(memoryStore);
           lastDbFetchTime = now;
@@ -230,6 +236,7 @@ export function updateMasterConfig(updates: Partial<MasterAppConfig>): MasterApp
     productionAppId: productionAppId || '',
     productionCertId: productionCertId || '',
     productionRuName: productionRuName || '',
+    googleDriveApiKey: updates.googleDriveApiKey !== undefined ? updates.googleDriveApiKey : (prev.googleDriveApiKey || ''),
     masterAppId: activeAppId || '',
     masterCertId: activeCertId || '',
     masterRuName: activeRuName || '',

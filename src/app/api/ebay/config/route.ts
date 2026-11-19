@@ -22,6 +22,9 @@ export async function GET() {
       masterConfig.productionRuName = process.env.EBAY_MASTER_RU_NAME || '';
     }
   }
+  if (!masterConfig.googleDriveApiKey && process.env.GOOGLE_DRIVE_API_KEY) {
+    masterConfig.googleDriveApiKey = process.env.GOOGLE_DRIVE_API_KEY;
+  }
   return NextResponse.json({
     success: true,
     config: masterConfig,
@@ -43,6 +46,7 @@ export async function POST(request: Request) {
       productionAppId: body.productionAppId,
       productionCertId: body.productionCertId,
       productionRuName: body.productionRuName,
+      googleDriveApiKey: body.googleDriveApiKey !== undefined ? (body.googleDriveApiKey || '').trim() : undefined,
     });
     const activeAccountId = getActiveAccountId();
     const accounts = getAccounts();

@@ -58,6 +58,10 @@ export async function POST(request: Request) {
         let userFriendlyError = scanResult.error || 'Google Drive folder scan failed.';
         if (userFriendlyError.includes('404') || userFriendlyError.toLowerCase().includes('not found')) {
           userFriendlyError = `Google Drive folder access nahi ho pa raha (404 Not Found). Kripya Google Drive me folder par Right Click ➔ Share ➔ 'Anyone with the link' (Viewer) select karein.`;
+        } else if (userFriendlyError.toLowerCase().includes('api key not valid') || userFriendlyError.toLowerCase().includes('invalid api key')) {
+          userFriendlyError = `Google Drive API Key valid nahi hai. Kripya Master API Setup (Settings tab) me ja kar valid Google Cloud API Key enter karein.`;
+        } else if (userFriendlyError.toLowerCase().includes('has not been used') || userFriendlyError.toLowerCase().includes('disabled')) {
+          userFriendlyError = `Google Cloud Console me "Google Drive API" enabled nahi hai. Kripya Google Cloud Console me ja kar Google Drive API enable karein.`;
         }
         return NextResponse.json({
           success: false,

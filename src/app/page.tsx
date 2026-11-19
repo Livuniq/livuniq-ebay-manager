@@ -34,6 +34,7 @@ import {
   UploadCloud,
   Save,
   Eye,
+  EyeOff,
   Heart,
 } from 'lucide-react';
 import { isJunkMessageOrCss } from '@/lib/ebay/template-engine';
@@ -127,6 +128,10 @@ export default function Home() {
   const [productionAppId, setProductionAppId] = useState('');
   const [productionCertId, setProductionCertId] = useState('');
   const [productionRuName, setProductionRuName] = useState('');
+  const [googleDriveApiKey, setGoogleDriveApiKey] = useState('');
+  const [showGdriveKey, setShowGdriveKey] = useState(false);
+  const [testingGdriveKey, setTestingGdriveKey] = useState(false);
+  const [gdriveKeyTestResult, setGdriveKeyTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [credActiveTab, setCredActiveTab] = useState<'sandbox' | 'production'>('sandbox');
   const [connectEnv, setConnectEnv] = useState<'sandbox' | 'production'>('sandbox');
   const [masterEnv, setMasterEnv] = useState<'demo' | 'sandbox' | 'production'>('sandbox');
@@ -219,6 +224,8 @@ export default function Home() {
         const activeCert = finalEnv === 'production' ? (prdCert || sbxCert) : (sbxCert || prdCert);
         const activeRu = finalEnv === 'production' ? (prdRu || sbxRu) : (sbxRu || prdRu);
 
+        const gdriveKey = cfgData.config.googleDriveApiKey || localCfg?.googleDriveApiKey || '';
+
         const resolvedConfig = {
           ...cfgData.config,
           environment: finalEnv,
@@ -231,6 +238,7 @@ export default function Home() {
           productionAppId: prdApp,
           productionCertId: prdCert,
           productionRuName: prdRu,
+          googleDriveApiKey: gdriveKey,
           isLiveConfigured: Boolean((sbxApp && sbxRu) || (prdApp && prdRu) || (activeApp && activeRu)),
         };
 
@@ -244,6 +252,7 @@ export default function Home() {
         setProductionAppId(prdApp);
         setProductionCertId(prdCert);
         setProductionRuName(prdRu);
+        setGoogleDriveApiKey(gdriveKey);
         setMasterEnv(finalEnv);
         setCredActiveTab(finalEnv === 'production' ? 'production' : 'sandbox');
         setConnectEnv(finalEnv === 'production' ? 'production' : 'sandbox');
@@ -1002,6 +1011,7 @@ export default function Home() {
       productionAppId,
       productionCertId,
       productionRuName,
+      googleDriveApiKey: googleDriveApiKey.trim(),
     };
 
     try {
@@ -1026,6 +1036,9 @@ export default function Home() {
         setProductionAppId(data.config.productionAppId || productionAppId);
         setProductionCertId(data.config.productionCertId || productionCertId);
         setProductionRuName(data.config.productionRuName || productionRuName);
+        if (data.config.googleDriveApiKey !== undefined) {
+          setGoogleDriveApiKey(data.config.googleDriveApiKey);
+        }
         if (data.activeAccountId) {
           setActiveAccountId(data.activeAccountId);
           await fetchAccountsAndData(data.activeAccountId);
@@ -1040,6 +1053,34 @@ export default function Home() {
       console.error('Save master settings error:', err);
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  // Test Google Drive API Key Validity & Google Drive API activation
+  const handleTestGoogleDriveKey = async () => {
+    const keyToTest = googleDriveApiKey.trim();
+    if (!keyToTest) {
+      setGdriveKeyTestResult({ success: false, message: 'Kripya pehle Google Drive API Key enter karein.' });
+      return;
+    }
+    setTestingGdriveKey(true);
+    setGdriveKeyTestResult(null);
+    try {
+      const res = await fetch('/api/ebay/config/test-gdrive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: keyToTest }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGdriveKeyTestResult({ success: true, message: '✓ Google Drive API Key valid & active hai! Drive scanning aur Video fetch ready hai.' });
+      } else {
+        setGdriveKeyTestResult({ success: false, message: `❌ Error: ${data.error}` });
+      }
+    } catch (err: any) {
+      setGdriveKeyTestResult({ success: false, message: `❌ Connection error: ${err.message}` });
+    } finally {
+      setTestingGdriveKey(false);
     }
   };
 
@@ -2744,6 +2785,124 @@ export default function Home() {
                         </div>
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* SECTION: GOOGLE DRIVE & CLOUD API SETUP */}
+                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-5 py-4 bg-gradient-to-r from-blue-50/70 via-slate-50 to-white border-b border-slate-200 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+                        <UploadCloud className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-xs flex items-center space-x-2">
+                          <span>Google Drive & Cloud API Key Setup</span>
+                          <span className="text-[10px] font-normal text-slate-500">(Auto-Fetch Media & Bulk Excel)</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Google Drive se SKU photos/videos bulk scan karne, Excel data auto-read karne, aur listings me video direct upload karne ke liye.
+                        </p>
+                      </div>
+                    </div>
+                    {googleDriveApiKey ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <Check className="w-3 h-3 mr-1" />
+                        Configured & Saved
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                        Not Configured
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div className="p-3 bg-blue-50/60 border border-blue-200/80 rounded-lg text-slate-700 text-[11px] leading-relaxed flex items-start space-x-2.5">
+                      <AlertCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Universal Auto-Fetch:</strong> Yahan API key save karne ke baad <strong>Bulk Listing</strong>, <strong>Single Edit</strong>, aur <strong>Media Fetcher</strong> automatically yahi key use karenge (bar-bar key enter nahi karni padegi). Developer Sandbox aur Production Live dono modes me ye key universally kaam karegi.
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-semibold text-slate-700">
+                          Google Cloud API Key (Drive API Enabled)
+                        </label>
+                        <a
+                          href="https://console.cloud.google.com/apis/credentials"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline flex items-center space-x-1"
+                        >
+                          <span>Google Cloud Console se Free Key lein</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                      <div className="relative flex items-center">
+                        <input
+                          type={showGdriveKey ? 'text' : 'password'}
+                          value={googleDriveApiKey}
+                          onChange={(e) => {
+                            setGoogleDriveApiKey(e.target.value);
+                            setGdriveKeyTestResult(null);
+                          }}
+                          placeholder="AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                          className="w-full border border-slate-300 rounded-lg p-2.5 pr-12 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowGdriveKey(!showGdriveKey)}
+                          className="absolute right-2 p-1.5 text-slate-400 hover:text-slate-600 transition rounded"
+                          title={showGdriveKey ? 'Hide Key' : 'Show Key'}
+                        >
+                          {showGdriveKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between">
+                        <p className="text-[11px] text-slate-400">
+                          Note: Google Cloud Console me <strong>APIs & Services ➔ "Google Drive API"</strong> ko Enable karna zaroori hai.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleTestGoogleDriveKey}
+                          disabled={testingGdriveKey || !googleDriveApiKey.trim()}
+                          className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-40 rounded border border-slate-300 font-semibold text-[11px] flex items-center space-x-1 transition cursor-pointer"
+                        >
+                          {testingGdriveKey ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Testing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-3 h-3 text-emerald-600" />
+                              <span>Test API Key</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {gdriveKeyTestResult && (
+                        <div
+                          className={`mt-2.5 p-2.5 rounded-lg text-[11px] flex items-start space-x-2 border ${
+                            gdriveKeyTestResult.success
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : 'bg-red-50 border-red-200 text-red-900'
+                          }`}
+                        >
+                          {gdriveKeyTestResult.success ? (
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1 leading-relaxed">
+                            {gdriveKeyTestResult.message}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
