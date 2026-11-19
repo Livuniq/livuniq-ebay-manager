@@ -124,13 +124,15 @@ export async function POST(request: Request) {
     if (isMessageEvent) {
       // Extract details
       const recipientMatch =
+        rawBody.match(/<RecipientID>([^<]+)<\/RecipientID>/i) ||
         rawBody.match(/<RecipientUserID>([^<]+)<\/RecipientUserID>/i) ||
+        rawBody.match(/<Seller>[\s\S]*?<UserID>([^<]+)<\/UserID>/i) ||
         rawBody.match(/<SellerUserID>([^<]+)<\/SellerUserID>/i) ||
         rawBody.match(/<SellerID>([^<]+)<\/SellerID>/i);
-      const recipientUsername = recipientMatch ? recipientMatch[1] : '';
+      const recipientUsername = recipientMatch ? recipientMatch[1].trim() : '';
 
       const itemIdMatch = rawBody.match(/<ItemID>([^<]+)<\/ItemID>/i);
-      const itemId = itemIdMatch ? itemIdMatch[1] : '';
+      const itemId = itemIdMatch ? itemIdMatch[1].trim() : '';
 
       const itemTitleMatch = rawBody.match(/<Title>([^<]+)<\/Title>/i);
       const itemTitle = itemTitleMatch ? decodeXmlEntities(itemTitleMatch[1]) : '';
@@ -139,7 +141,7 @@ export async function POST(request: Request) {
         rawBody.match(/<SenderID>([^<]+)<\/SenderID>/i) ||
         rawBody.match(/<Sender>([^<]+)<\/Sender>/i) ||
         rawBody.match(/<BuyerUserID>([^<]+)<\/BuyerUserID>/i);
-      const senderId = senderIdMatch ? senderIdMatch[1] : 'buyer';
+      const senderId = senderIdMatch ? senderIdMatch[1].trim() : 'buyer';
 
       const subjectMatch = rawBody.match(/<Subject>([\s\S]*?)<\/Subject>/i);
       const subject = subjectMatch ? decodeXmlEntities(subjectMatch[1]) : 'Inquiry regarding listing';
@@ -148,18 +150,35 @@ export async function POST(request: Request) {
       const messageBody = bodyMatch ? decodeXmlEntities(bodyMatch[1]) : '';
 
       const messageIdMatch = rawBody.match(/<MessageID>([^<]+)<\/MessageID>/i);
-      const messageId = messageIdMatch ? messageIdMatch[1] : `${Date.now()}`;
+      const messageId = messageIdMatch ? messageIdMatch[1].trim() : `${Date.now()}`;
 
-      // Find target store account
-      let targetAccount = store.accounts.find(
-        (a) =>
-          a.ebayUsername.toLowerCase() === recipientUsername.toLowerCase() ||
-          (recipientUsername && a.storeName.toLowerCase().includes(recipientUsername.toLowerCase()))
-      );
+      // Find target store account:
+      // 1. By recipient username
+      let targetAccount = recipientUsername
+        ? store.accounts.find(
+            (a) =>
+              a.ebayUsername.toLowerCase() === recipientUsername.toLowerCase() ||
+              a.storeName.toLowerCase().includes(recipientUsername.toLowerCase())
+          )
+        : undefined;
 
+      // 2. By matched Item ID from store listings
+      if (!targetAccount && itemId) {
+        const matchedListing = store.listings.find(
+          (l) => l.ebayListingId === itemId || l.id === itemId || l.id === `lst-${itemId}`
+        );
+        if (matchedListing) {
+          targetAccount = store.accounts.find((a) => a.id === matchedListing.accountId);
+        }
+      }
+
+      // 3. Fallback to active account or first production account
       if (!targetAccount) {
         const activeId = getActiveAccountId();
-        targetAccount = store.accounts.find((a) => a.id === activeId) || store.accounts[0];
+        targetAccount =
+          store.accounts.find((a) => a.id === activeId) ||
+          store.accounts.find((a) => a.environment === 'production') ||
+          store.accounts[0];
       }
 
       if (targetAccount && messageBody) {

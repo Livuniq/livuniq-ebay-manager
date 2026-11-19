@@ -932,6 +932,35 @@ export default function Home() {
     }
   }, [activeTab, activeAccountId]);
 
+  // Live Auto-Refresh: Real-time background sync for instant message delivery
+  useEffect(() => {
+    // Check DB every 5 seconds when on Messages tab, every 30 seconds across dashboard
+    const pollIntervalMs = activeTab === 'messages' ? 5000 : 30000;
+    const pollTimer = setInterval(() => {
+      fetch(`/api/ebay/messages?accountId=${encodeURIComponent(activeAccountId || '')}&sync=false`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.success && Array.isArray(data.threads)) {
+            setThreads((prev) => {
+              if (
+                data.threads.length !== prev.length ||
+                data.threads[0]?.lastUpdated !== prev[0]?.lastUpdated ||
+                data.threads[0]?.unread !== prev[0]?.unread
+              ) {
+                return data.threads;
+              }
+              return prev;
+            });
+          }
+        })
+        .catch(() => {});
+    }, pollIntervalMs);
+
+    return () => {
+      clearInterval(pollTimer);
+    };
+  }, [activeTab, activeAccountId]);
+
   // Delete single message thread
   const handleDeleteThread = async (threadId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
