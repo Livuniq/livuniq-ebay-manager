@@ -403,7 +403,7 @@ export function renderDescriptionTemplate(templateHtml: string, data: ListingTem
   const mainImg = photoOnlyImages[0] || '';
   output = output.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, mainImg);
 
-  for (let i = 1; i <= 12; i++) {
+  for (let i = 1; i <= 24; i++) {
     const imgUrl = photoOnlyImages[i - 1] || '';
     output = output.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), imgUrl);
   }
@@ -433,8 +433,8 @@ export function renderDescriptionTemplate(templateHtml: string, data: ListingTem
     output = output.replace(rawGallBlockRegex, dynamicRadioHtml);
   }
 
-  // 3d. Literal IMG_1..12 and THUMB_1..12 replacement
-  for (let i = 1; i <= 12; i++) {
+  // 3d. Literal IMG_1..24 and THUMB_1..24 replacement
+  for (let i = 1; i <= 24; i++) {
     const imgUrl = photoOnlyImages[i - 1] || '';
     output = output.replace(new RegExp(`IMG_${i}`, 'g'), imgUrl);
     output = output.replace(new RegExp(`THUMB_${i}`, 'g'), imgUrl);
@@ -732,7 +732,7 @@ function findMatchingDivEnd(html: string, startIndex: number): number {
   const len = html.length;
 
   while (i < len) {
-    if (html.slice(i, i + 4).toLowerCase() === '<div') {
+    if (html.slice(i, i + 4).toLowerCase() === '<div' && /[\s>]/.test(html[i + 4] || '')) {
       depth++;
       i += 4;
     } else if (html.slice(i, i + 6).toLowerCase() === '</div>') {
@@ -746,6 +746,22 @@ function findMatchingDivEnd(html: string, startIndex: number): number {
     }
   }
   return -1;
+}
+
+// Replace the inner contents of a matched <div>...</div> container cleanly using tag depth counting
+function replaceDivContent(html: string, classOrIdPattern: RegExp, newInnerContent: string): string {
+  const match = html.match(classOrIdPattern);
+  if (!match || match.index === undefined) return html;
+
+  const divStart = match.index;
+  const tagEnd = html.indexOf('>', divStart);
+  if (tagEnd === -1) return html;
+
+  const divClose = findMatchingDivEnd(html, divStart);
+  if (divClose === -1) return html;
+
+  const openingTag = html.substring(divStart, tagEnd + 1);
+  return html.substring(0, divStart) + openingTag + '\n' + newInnerContent + '\n</div>' + html.substring(divClose);
 }
 
 // Check if an image tag or src is a static template asset (logo, banner, guarantee, icon, etc.)
@@ -806,59 +822,117 @@ export function updateDescriptionImages(
   const validNew = deduplicateImageUrls(newImages);
   if (validNew.length === 0) return updated;
 
-  // 1. Update VeronaLuxe Gallery (Stage slides & Thumbnails row)
-  if (updated.includes('vl-gallery-stage') || updated.includes('vl-thumbs-row')) {
-    // Replace images inside each vl-slide
-    let slideIdx = 0;
-    updated = updated.replace(
-      /(<div[^>]*class=["'][^"']*vl-slide[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/div>)/gi,
-      (match, prefix, oldSrc, suffix) => {
-        const rep = validNew[slideIdx % validNew.length];
-        slideIdx++;
-        return `${prefix}${rep}${suffix}`;
-      }
-    );
+  // 1. Update VeronaLuxe Gallery (Dynamically expands radio buttons, stage slides, and thumbnails to match all N new photos)
+  if (updated.includes('vl-gallery-stage') || updated.includes('vl-thumbs-row') || updated.includes('vl-radio')) {
+    // 1a. Generate N radio buttons
+    const radiosHtml = validNew
+      .map((_, idx) => {
+        const checked = idx === 0 ? ' checked="checked"' : '';
+        return `    <input type="radio" name="veronaluxe-gallery" id="veronaluxe-img${idx + 1}" class="vl-radio"${checked} />`;
+      })
+      .join('\n');
 
-    // Replace images inside each vl-thumb-label
-    let thumbIdx = 0;
-    updated = updated.replace(
-      /(<label[^>]*class=["'][^"']*vl-thumb-label[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/label>)/gi,
-      (match, prefix, oldSrc, suffix) => {
-        const rep = validNew[thumbIdx % validNew.length];
-        thumbIdx++;
-        return `${prefix}${rep}${suffix}`;
-      }
-    );
+    const radioRegex = /(?:<input\s+[^>]*id=["']veronaluxe-img\d+["'][^>]*>\s*)+/i;
+    if (radioRegex.test(updated)) {
+      updated = updated.replace(radioRegex, () => `${radiosHtml}\n\n`);
+    }
+
+    // 1b. Generate N slides
+    const slidesHtml = validNew
+      .map((url, idx) => {
+        const num = idx + 1;
+        return `    <div class="vl-slide vl-slide-${num}"><img src="${url}" alt="Jewelry View ${num}" /></div>`;
+      })
+      .join('\n');
+    updated = replaceDivContent(updated, /<div[^>]*class=["'][^"']*vl-gallery-stage[^"']*["'][^>]*>/i, slidesHtml);
+
+    // 1c. Generate N thumbnails (wraps smoothly 5 per row)
+    const thumbsHtml = validNew
+      .map((url, idx) => {
+        const num = idx + 1;
+        return `    <label for="veronaluxe-img${num}" class="vl-thumb-label" title="View ${num}"><img src="${url}" alt="Thumb ${num}" /></label>`;
+      })
+      .join('\n');
+    updated = replaceDivContent(updated, /<div[^>]*class=["'][^"']*vl-thumbs-row[^"']*["'][^>]*>/i, thumbsHtml);
+
+    // 1d. Dynamic CSS for all N items
+    const activeSlideSelectors = validNew
+      .map((_, i) => `#veronaluxe-img${i + 1}:checked ~ .vl-gallery-stage .vl-slide-${i + 1}`)
+      .join(',\n');
+    const activeThumbSelectors = validNew
+      .map((_, i) => `#veronaluxe-img${i + 1}:checked ~ .vl-thumbs-row label[for="veronaluxe-img${i + 1}"]`)
+      .join(',\n');
+
+    const dynamicVeronaCss = `<style>
+/* Dynamic VeronaLuxe Gallery Scaling for ${validNew.length} Images */
+.vl-thumbs-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  justify-content: center !important;
+}
+.vl-thumbs-row .vl-thumb-label {
+  flex: 0 0 calc(20% - 8px) !important;
+  max-width: 80px !important;
+  aspect-ratio: 1 / 1 !important;
+  cursor: pointer !important;
+}
+${activeSlideSelectors} {
+  display: block !important;
+}
+${activeThumbSelectors} {
+  border-color: #631726 !important;
+  box-shadow: 0 0 0 1.5px #631726 !important;
+}
+</style>`;
+
+    if (updated.includes('/* Dynamic VeronaLuxe Gallery Scaling')) {
+      updated = updated.replace(/<style>[\s\S]*?\/\* Dynamic VeronaLuxe Gallery Scaling[\s\S]*?<\/style>/i, () => dynamicVeronaCss);
+    } else if (/<div[^>]*class=["'][^"']*vl-gallery-card[^"']*["'][^>]*>/i.test(updated)) {
+      updated = updated.replace(/<div[^>]*class=["'][^"']*vl-gallery-card[^"']*["'][^>]*>/i, (m) => `${dynamicVeronaCss}\n${m}`);
+    } else {
+      updated = `${dynamicVeronaCss}\n${updated}`;
+    }
   }
 
-  // 2. Update DIPTAM / Livuniq #gallBlock Gallery
-  if (updated.includes('gallBlock') || updated.includes('lrgImg') || updated.includes('imgSmIn')) {
-    // Replace large images (.lrgImg or #imgblock*)
-    let lrgIdx = 0;
-    updated = updated.replace(
-      /(<div[^>]*class=["'][^"']*lrgImg[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/div>)/gi,
-      (match, prefix, oldSrc, suffix) => {
-        const rep = validNew[lrgIdx % validNew.length];
-        lrgIdx++;
-        return `${prefix}${rep}${suffix}`;
-      }
-    );
+  // 2. Update DIPTAM / Livuniq #gallBlock Gallery (Dynamically replaces with full responsive N-item gallery)
+  if (updated.includes('gallBlock') || (updated.includes('lrgImg') && updated.includes('imgSmIn'))) {
+    const gbMatch = updated.match(/<div[^>]*id=["']gallBlock["'][^>]*>/i);
+    if (gbMatch && gbMatch.index !== undefined) {
+      const divStart = gbMatch.index;
+      const divEnd = findMatchingDivEnd(updated, divStart);
+      if (divEnd !== -1) {
+        let replaceStart = divStart;
+        const beforeDiv = updated.substring(Math.max(0, divStart - 5000), divStart);
+        const lastStyleClose = beforeDiv.lastIndexOf('</style>');
+        const lastStyleOpen = beforeDiv.lastIndexOf('<style');
+        if (lastStyleOpen !== -1 && lastStyleClose !== -1 && lastStyleClose > lastStyleOpen) {
+          const between = beforeDiv.substring(lastStyleClose + 8).trim();
+          if (!between) {
+            const styleContent = beforeDiv.substring(lastStyleOpen, lastStyleClose + 8);
+            if (styleContent.includes('#gallBlock')) {
+              const actualStyleStart = divStart - (beforeDiv.length - lastStyleOpen);
+              replaceStart = actualStyleStart;
+            }
+          }
+        }
 
-    // Replace thumbnails (.imgSmIn)
-    let thumbDiptamIdx = 0;
-    updated = updated.replace(
-      /(<div[^>]*class=["']imgSmIn["'][^>]*>[\s\S]*?<img[^>]*src=["'])([^"']+)(["'][^>]*>[\s\S]*?<\/div>)/gi,
-      (m, p, oldSrc, s) => {
-        const rep = validNew[thumbDiptamIdx % validNew.length];
-        thumbDiptamIdx++;
-        return `${p}${rep}${s}`;
+        const newGalleryHtml = generateRadioGalleryHtml(validNew);
+        updated = updated.substring(0, replaceStart) + newGalleryHtml + updated.substring(divEnd);
+
+        // Expand any top-level stylesheet selector rules like #gallBlock #img1:checked~#imgblock1,...{display:block !important;}
+        const topActiveSelectors = validNew.map((_, i) => `#gallBlock #img${i + 1}:checked~#imgblock${i + 1}`).join(',');
+        updated = updated.replace(
+          /#gallBlock\s+#img1:checked~#imgblock1[^\{]*\{display:\s*block\s*!important;\}/gi,
+          () => `${topActiveSelectors}{display:block !important;}`
+        );
       }
-    );
+    }
   }
 
-  // 3. Template placeholders replacement
+  // 3. Template placeholders replacement (Supports up to 24 product images!)
   updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, () => validNew[0]);
-  for (let i = 1; i <= 12; i++) {
+  for (let i = 1; i <= 24; i++) {
     const rep = validNew[i - 1] || validNew[0];
     updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), () => rep);
     updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), () => rep);
