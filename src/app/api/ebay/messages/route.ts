@@ -76,7 +76,10 @@ export async function POST(request: Request) {
     if (body.action === 'simulate') {
       const store = getStore();
       const targetAccountId = body.accountId || getActiveAccountId();
-      const account = getAccountForEnvironment(targetAccountId);
+      const account =
+        (body.accountId ? store.accounts.find((a) => a.id === body.accountId) : null) ||
+        getAccountForEnvironment(targetAccountId);
+      const finalStoreName = account?.storeName || account?.ebayUsername || 'Livuniq';
 
       const sampleQueries = [
         {
@@ -154,7 +157,7 @@ export async function POST(request: Request) {
         try {
           const aiDraft = await generateAiCustomerReply({
             geminiApiKey: geminiKey,
-            storeName: account?.storeName || 'Livuniq',
+            storeName: finalStoreName,
             buyerName: finalBuyerName,
             buyerUsername: finalBuyerUsername,
             incomingMessage: finalMessage,
@@ -167,7 +170,7 @@ export async function POST(request: Request) {
             if (store.masterConfig?.aiAutoReplyMode === 'auto') {
               newThread.messages.push({
                 id: `msg-${Date.now() + 1}`,
-                sender: account?.storeName || 'Livuniq',
+                sender: finalStoreName,
                 senderRole: 'SELLER',
                 timestamp: new Date().toISOString(),
                 body: aiDraft,

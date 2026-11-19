@@ -28,8 +28,11 @@ export async function POST(request: Request) {
       });
     }
 
-    const account = getAccountForEnvironment(accountId) || store.accounts.find((a) => a.id === thread.accountId);
-    const storeName = account?.storeName || 'Livuniq';
+    const account =
+      store.accounts.find((a) => a.id === thread.accountId) ||
+      (accountId ? store.accounts.find((a) => a.id === accountId) : null) ||
+      getAccountForEnvironment(accountId);
+    const storeName = account?.storeName || account?.ebayUsername || 'Livuniq';
 
     // Find matched listing for product specifics
     const matchedListing =

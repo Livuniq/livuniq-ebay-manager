@@ -1140,7 +1140,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'simulate',
-          accountId: activeAccount?.id,
+          accountId: activeAccountId || activeAccount?.id,
           question: testMsgQuestion.trim(),
           listingId: testMsgListingId || undefined,
           buyerName: testMsgBuyerName.trim() || 'Jessica Miller',
@@ -1170,7 +1170,7 @@ export default function Home() {
       const res = await fetch('/api/ebay/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'simulate', accountId: activeAccount?.id }),
+        body: JSON.stringify({ action: 'simulate', accountId: activeAccountId || activeAccount?.id }),
       });
       const data = await res.json();
       if (data.success && data.thread) {

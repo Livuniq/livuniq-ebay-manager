@@ -287,10 +287,10 @@ export function getAccountForEnvironment(accountId?: string): ConnectedAccount |
   const store = getStore();
   const isProd = isProductionEnvironment();
 
-  // 1. If explicit accountId provided and it matches current environment, return it
+  // 1. If explicit accountId provided, always honor it directly
   if (accountId) {
     const acc = store.accounts.find((a) => a.id === accountId);
-    if (acc && isAccountForCurrentEnvironment(acc)) {
+    if (acc) {
       return acc;
     }
   }
