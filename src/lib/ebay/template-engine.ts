@@ -857,12 +857,12 @@ export function updateDescriptionImages(
   }
 
   // 3. Template placeholders replacement
-  updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, validNew[0]);
+  updated = updated.replace(/\{\{\s*(main_image|image_1)\s*\}\}/gi, () => validNew[0]);
   for (let i = 1; i <= 12; i++) {
     const rep = validNew[i - 1] || validNew[0];
-    updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), rep);
-    updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), rep);
-    updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), rep);
+    updated = updated.replace(new RegExp(`IMG_${i}`, 'g'), () => rep);
+    updated = updated.replace(new RegExp(`THUMB_${i}`, 'g'), () => rep);
+    updated = updated.replace(new RegExp(`\\{\\{\\s*image_${i}\\s*\\}\\}`, 'gi'), () => rep);
   }
 
   // 4. Direct exact and protocol-agnostic replacement of known old product photos
@@ -888,7 +888,7 @@ export function updateDescriptionImages(
     if (!oldHash) continue;
     const replacement = validNew[i] || validNew[0];
     const hashRegex = new RegExp(`(src=["'])([^"']*${oldHash}[^"']*)(["'])`, 'gi');
-    updated = updated.replace(hashRegex, `$1${replacement}$3`);
+    updated = updated.replace(hashRegex, (m, p1, p2, p3) => `${p1}${replacement}${p3}`);
   }
 
   // 5. Fallback: If any non-static product <img> tags remain that still have old image sources, replace them
