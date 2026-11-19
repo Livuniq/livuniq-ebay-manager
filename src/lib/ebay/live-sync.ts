@@ -1186,6 +1186,25 @@ export async function addLiveEbayListing(
     validAddImages.length > 0 ? validAddImages : ['https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/dasAAOSwRdNmbcnI/$_57.JPG?set_id=880000500F']
   );
 
+  let effectiveAddVideoId = listing.videoId;
+  if (!effectiveAddVideoId && listing.videoUrl) {
+    try {
+      console.log(`[eBay Video] Auto-uploading video for new item ${listing.sku || 'ITEM'}...`);
+      const vidRes = await uploadVideoToEbayMediaApi(
+        account,
+        listing.videoUrl,
+        `video_${listing.sku || 'item'}.mp4`,
+        (store.masterConfig as any)?.googleDriveApiKey
+      );
+      if (vidRes.success && vidRes.videoId) {
+        effectiveAddVideoId = vidRes.videoId;
+        console.log(`[eBay Video] Video uploaded successfully for new item! VideoID: ${effectiveAddVideoId}`);
+      }
+    } catch (vErr) {
+      console.warn('[eBay Video] Auto-upload video in addLiveEbayListing exception:', vErr);
+    }
+  }
+
   const pictureDetailsXml = `<PictureDetails>
     <GalleryType>Gallery</GalleryType>
     ${finalImages.map((url) => `<PictureURL>${cleanXmlUrl(url)}</PictureURL>`).join('')}
@@ -1250,7 +1269,7 @@ export async function addLiveEbayListing(
     })()}
     ${pictureDetailsXml}
     ${specificsXml}
-    ${listing.videoId ? `<VideoDetails><VideoID>${listing.videoId}</VideoID></VideoDetails>` : ''}
+    ${effectiveAddVideoId ? `<VideoDetails><VideoID>${effectiveAddVideoId}</VideoID></VideoDetails>` : ''}
     <OutOfStockControl>true</OutOfStockControl>
   </Item>
 </AddFixedPriceItemRequest>`;

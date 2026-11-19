@@ -29,6 +29,7 @@ import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
 import { EBAY_JEWELRY_CATEGORIES, EBAY_FILE_EXCHANGE_CONDITIONS } from '@/lib/ebay/constants';
 import { isEbayItemSpecific } from '@/lib/ebay/specifics-rules';
 import { isVideoMedia, updateDescriptionImages } from '@/lib/ebay/template-engine';
+import { extractGoogleDriveId } from '@/lib/ebay/google-drive-scanner';
 import HtmlTemplateSection from './HtmlTemplateSection';
 import BusinessPoliciesSelector from './BusinessPoliciesSelector';
 
@@ -126,6 +127,7 @@ export default function EditListingModal({
 
   const [imageUrlInput, setImageUrlInput] = useState('');
   const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [fetchingVideo, setFetchingVideo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPushingToEbay, setIsPushingToEbay] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -364,6 +366,34 @@ export default function EditListingModal({
     } finally {
       setUploadingFiles(false);
       if (videoInputRef.current) videoInputRef.current.value = '';
+    }
+  };
+
+  const handleFetchAndConnectVideo = async () => {
+    if (!videoUrl.trim()) return;
+    setFetchingVideo(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      const res = await fetch('/api/ebay/media/fetch-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrl: videoUrl.trim(),
+          sku: sku.trim() || listing?.sku || 'ITEM',
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.videoId) {
+        setVideoId(data.videoId);
+        setSuccessMessage('Video successfully fetched from Google Drive and connected to eBay Media!');
+      } else {
+        setErrorMessage(data.error || 'Failed to fetch video from Google Drive');
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error fetching video');
+    } finally {
+      setFetchingVideo(false);
     }
   };
 
@@ -1055,19 +1085,28 @@ export default function EditListingModal({
 
                 {/* Direct Video URL or eBay Media ID Inputs */}
                 <div className="mt-3 pt-3 border-t border-slate-200">
-                  <div className="text-[11px] font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                  <div className="text-[11px] font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
                     <span>Or Provide Direct Video Link / eBay Media ID:</span>
+                    {videoUrl && extractGoogleDriveId(videoUrl).id && (
+                      <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded font-medium flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                        Google Drive Link Detected
+                      </span>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                     <div>
                       <label className="block text-[10px] font-medium text-slate-500 mb-1">
-                        Video URL (Direct .MP4 / Web Link):
+                        Video URL (Google Drive / Direct .MP4 Link):
                       </label>
                       <input
                         type="url"
                         value={videoUrl.startsWith('blob:') ? '' : videoUrl}
-                        onChange={(e) => setVideoUrl(e.target.value.trim())}
-                        placeholder="https://example.com/diamond-video.mp4"
+                        onChange={(e) => {
+                          setVideoUrl(e.target.value.trim());
+                          setErrorMessage('');
+                        }}
+                        placeholder="https://drive.google.com/file/d/... or direct .mp4 link"
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white"
                       />
                     </div>
@@ -1078,30 +1117,83 @@ export default function EditListingModal({
                       <input
                         type="text"
                         value={videoId}
-                        onChange={(e) => setVideoId(e.target.value.trim())}
-                        placeholder="e.g. 50012345678"
+                        onChange={(e) => {
+                          setVideoId(e.target.value.trim());
+                          setErrorMessage('');
+                        }}
+                        placeholder="e.g. 50012345678 or v1|..."
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white"
                       />
                     </div>
                   </div>
+
+                  {videoUrl && !videoId && (
+                    <div className="mt-2.5 flex items-center justify-between bg-purple-50 border border-purple-200 p-2.5 rounded-lg">
+                      <div className="text-[11px] text-purple-900 pr-2">
+                        <span className="font-semibold">Ready to connect:</span> Click fetch to download from Google Drive and register with eBay Media API.
+                      </div>
+                      <button
+                        type="button"
+                        disabled={fetchingVideo || !videoUrl.trim()}
+                        onClick={handleFetchAndConnectVideo}
+                        className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold text-xs px-3 py-1.5 rounded-lg flex items-center space-x-1.5 transition shadow-xs cursor-pointer flex-shrink-0"
+                      >
+                        {fetchingVideo ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Fetching & Uploading...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Fetch & Connect to eBay</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {(videoUrl || videoId) && (
                   <div className="mt-3 pt-3 border-t border-slate-200 flex flex-col items-center">
-                    {videoUrl ? (
-                      <video src={videoUrl} controls className="max-h-48 rounded-lg shadow-xs border border-slate-300" />
-                    ) : (
-                      <div className="flex items-center space-x-2 bg-purple-50 text-purple-900 px-4 py-3 rounded-lg border border-purple-200">
-                        <Video className="w-5 h-5 text-purple-600" />
-                        <div>
-                          <div className="font-bold text-xs">Video Connected on eBay</div>
-                          <div className="text-[10px] text-purple-700">Media ID: {videoId}</div>
+                    {(() => {
+                      const gDriveId = videoUrl ? extractGoogleDriveId(videoUrl).id : null;
+                      if (gDriveId) {
+                        return (
+                          <div className="w-full flex flex-col items-center">
+                            <div className="w-full max-w-sm aspect-video bg-black rounded-lg overflow-hidden border border-slate-300 relative shadow-sm">
+                              <iframe
+                                src={`https://drive.google.com/file/d/${gDriveId}/preview`}
+                                className="w-full h-full border-0"
+                                allow="autoplay"
+                                title="Google Drive Video Preview"
+                              />
+                            </div>
+                            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-blue-700 font-medium">
+                              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                              Google Drive Video Preview Ready
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (videoUrl) {
+                        return (
+                          <video src={videoUrl} controls className="max-h-48 rounded-lg shadow-xs border border-slate-300" />
+                        );
+                      }
+                      return (
+                        <div className="flex items-center space-x-2 bg-purple-50 text-purple-900 px-4 py-3 rounded-lg border border-purple-200">
+                          <Video className="w-5 h-5 text-purple-600" />
+                          <div>
+                            <div className="font-bold text-xs">Video Connected on eBay</div>
+                            <div className="text-[10px] text-purple-700">Media ID: {videoId}</div>
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                     {videoId && (
-                      <span className="mt-2 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold border border-emerald-200">
-                        ✓ Connected to eBay Media ID: {videoId}
+                      <span className="mt-2 text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-semibold border border-emerald-200 flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3 text-emerald-600" /> Connected to eBay Media ID: {videoId}
                       </span>
                     )}
                     <button
@@ -1109,6 +1201,7 @@ export default function EditListingModal({
                       onClick={() => {
                         setVideoUrl('');
                         setVideoId('');
+                        setErrorMessage('');
                       }}
                       className="mt-2 text-rose-600 hover:text-rose-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                     >

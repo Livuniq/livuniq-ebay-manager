@@ -26,21 +26,20 @@ export function extractGoogleDriveId(url: string): { id: string | null; isFolder
   // Folder URLs:
   // https://drive.google.com/drive/folders/1abc123...
   // https://drive.google.com/drive/u/0/folders/1abc123...
-  const folderMatch = trimmed.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  const folderMatch = trimmed.match(/(?:folders\/|folder\/)([a-zA-Z0-9_-]+)/i);
   if (folderMatch) return { id: folderMatch[1], isFolder: true };
 
-  // ID param: ?id=1abc123...
-  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (idParamMatch) return { id: idParamMatch[1], isFolder: trimmed.includes('folder') };
+  // ID param: ?id=1abc123... or &id=1abc123...
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+  if (idParamMatch) return { id: idParamMatch[1], isFolder: trimmed.toLowerCase().includes('folder') };
 
-  // File URLs:
-  // https://drive.google.com/file/d/1abc123...
-  const fileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  // File URLs: handles full url, /file/d/..., /d/..., ile/d/..., or d/...
+  const fileMatch = trimmed.match(/(?:file\/d\/|\/d\/|^d\/)([a-zA-Z0-9_-]+)/i);
   if (fileMatch) return { id: fileMatch[1], isFolder: false };
 
   // Direct ID string if user simply pasted the ID
   if (/^[a-zA-Z0-9_-]{20,50}$/.test(trimmed)) {
-    return { id: trimmed, isFolder: true };
+    return { id: trimmed, isFolder: false };
   }
 
   return { id: null, isFolder: false };

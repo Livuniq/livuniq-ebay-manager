@@ -232,6 +232,9 @@ export async function PATCH(request: Request) {
 
         // If it already has an ebayListingId, try revising it
         if (currentListing.ebayListingId) {
+          const store = getStore();
+          const gApiKey = (store.masterConfig as any)?.googleDriveApiKey || process.env.GOOGLE_DRIVE_API_KEY;
+
           const reviseResult = await reviseLiveEbayListing(account, currentListing.ebayListingId, {
             title: currentListing.title,
             price: currentListing.price,
@@ -244,6 +247,8 @@ export async function PATCH(request: Request) {
             categoryId: currentListing.categoryId,
             conditionId: currentListing.conditionId,
             videoId: currentListing.videoId,
+            videoUrl: currentListing.videoUrl || updates.videoUrl,
+            apiKey: gApiKey,
             shippingPolicyId: currentListing.shippingPolicyId,
             shippingPolicyName: currentListing.shippingPolicyName,
             returnPolicyId: currentListing.returnPolicyId,
@@ -251,9 +256,9 @@ export async function PATCH(request: Request) {
             paymentPolicyId: currentListing.paymentPolicyId,
             paymentPolicyName: currentListing.paymentPolicyName,
             scheduledTime: currentListing.scheduledTime,
-            locationCountry: currentListing.locationCountry || account?.locationCountry,
-            locationPostalCode: currentListing.locationPostalCode || account?.locationPostalCode,
-            locationCityState: currentListing.locationCityState || account?.locationCityState,
+            locationCountry: updates.locationCountry ? updates.locationCountry : undefined,
+            locationPostalCode: updates.locationPostalCode ? updates.locationPostalCode : undefined,
+            locationCityState: updates.locationCityState ? updates.locationCityState : undefined,
           });
 
           console.log('eBay reviseLiveEbayListing result:', reviseResult);
@@ -262,6 +267,10 @@ export async function PATCH(request: Request) {
             isSuccess = true;
             ebayLiveStatus = 'LIVE_UPDATED';
             ebayMessage = reviseResult.message;
+            if (reviseResult.videoId && reviseResult.videoId !== currentListing.videoId) {
+              currentListing.videoId = reviseResult.videoId;
+              updateListing(id, { videoId: reviseResult.videoId });
+            }
           } else if (reviseResult.message.includes('The scheduled time occurs in the past')) {
             // Item is already active on eBay (cannot set schedule time on an already active listing)
             const retryResult = await reviseLiveEbayListing(account, currentListing.ebayListingId, {
@@ -276,6 +285,8 @@ export async function PATCH(request: Request) {
               categoryId: currentListing.categoryId,
               conditionId: currentListing.conditionId,
               videoId: currentListing.videoId,
+              videoUrl: currentListing.videoUrl || updates.videoUrl,
+              apiKey: gApiKey,
               shippingPolicyId: currentListing.shippingPolicyId,
               shippingPolicyName: currentListing.shippingPolicyName,
               returnPolicyId: currentListing.returnPolicyId,
@@ -286,6 +297,10 @@ export async function PATCH(request: Request) {
             isSuccess = true;
             ebayLiveStatus = 'LIVE_UPDATED';
             ebayMessage = 'Listing is already live and active on eBay marketplace!';
+            if (retryResult.videoId && retryResult.videoId !== currentListing.videoId) {
+              currentListing.videoId = retryResult.videoId;
+              updateListing(id, { videoId: retryResult.videoId });
+            }
           } else if (
             reviseResult.message.includes('deleted') ||
             reviseResult.message.includes('not the seller') ||
