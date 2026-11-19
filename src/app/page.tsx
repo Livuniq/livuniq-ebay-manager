@@ -37,6 +37,7 @@ import {
   EyeOff,
   Heart,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { isJunkMessageOrCss } from '@/lib/ebay/template-engine';
 import {
@@ -1119,8 +1120,50 @@ export default function Home() {
     }
   }, [threads, selectedThreadId]);
 
-  // Simulate an incoming buyer message for testing
+  // Simulate an incoming buyer message for testing & Custom Question Modal State
+  const [showTestMsgModal, setShowTestMsgModal] = useState(false);
+  const [testMsgQuestion, setTestMsgQuestion] = useState('');
+  const [testMsgListingId, setTestMsgListingId] = useState('');
+  const [testMsgBuyerName, setTestMsgBuyerName] = useState('Jessica Miller');
   const [isSimulatingMessage, setIsSimulatingMessage] = useState(false);
+
+  const handleSimulateCustomMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!testMsgQuestion.trim()) {
+      alert('Kripya pehle test question likhein.');
+      return;
+    }
+    setIsSimulatingMessage(true);
+    try {
+      const res = await fetch('/api/ebay/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'simulate',
+          accountId: activeAccount?.id,
+          question: testMsgQuestion.trim(),
+          listingId: testMsgListingId || undefined,
+          buyerName: testMsgBuyerName.trim() || 'Jessica Miller',
+          buyerUsername: (testMsgBuyerName.trim() || 'jessica_miller').toLowerCase().replace(/\s+/g, '_'),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.thread) {
+        setThreads((prev) => [data.thread, ...prev]);
+        setSelectedThreadId(data.thread.id);
+        setShowTestMsgModal(false);
+        setTestMsgQuestion('');
+      } else {
+        alert(data.error || 'Failed to simulate test message');
+      }
+    } catch (err: any) {
+      console.error('Failed to simulate message:', err);
+      alert('Error simulating message: ' + err.message);
+    } finally {
+      setIsSimulatingMessage(false);
+    }
+  };
+
   const handleSimulateMessage = async () => {
     setIsSimulatingMessage(true);
     try {
@@ -2321,7 +2364,8 @@ export default function Home() {
 
           {/* TAB 4: MESSAGES */}
           {activeTab === 'messages' && (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 h-[calc(100vh-185px)] min-h-[520px] max-h-[780px] overflow-hidden">
+            <>
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-3 h-[calc(100vh-185px)] min-h-[520px] max-h-[780px] overflow-hidden">
               <div className="border-r border-slate-200 flex flex-col h-full min-h-0">
                 <div className="p-3.5 border-b border-slate-200 bg-slate-50 font-semibold text-xs text-slate-700 flex items-center justify-between flex-shrink-0">
                   <div className="flex items-center space-x-2">
@@ -2343,12 +2387,17 @@ export default function Home() {
                       <span>{isSyncingMessages ? 'Syncing...' : 'Sync eBay Inbox (Full 1 Yr)'}</span>
                     </button>
                     <button
-                      onClick={handleSimulateMessage}
-                      disabled={isSimulatingMessage}
-                      className="text-[11px] font-medium bg-white hover:bg-blue-50 text-blue-600 hover:text-blue-700 border border-slate-200 hover:border-blue-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
-                      title="Generate a test incoming buyer inquiry"
+                      onClick={() => {
+                        if (!testMsgListingId && listings.length > 0) {
+                          setTestMsgListingId(listings[0].id || listings[0].ebayListingId || '');
+                        }
+                        setShowTestMsgModal(true);
+                      }}
+                      className="text-[11px] font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-800 border border-purple-200 hover:border-purple-300 px-2.5 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
+                      title="Test Gemini AI with your own custom buyer question"
                     >
-                      <span>{isSimulatingMessage ? 'Creating...' : '+ Test'}</span>
+                      <Sparkles className="w-3 h-3 text-purple-600" />
+                      <span>+ Test AI Question</span>
                     </button>
                     <button
                       onClick={handleClearAllMessages}
@@ -2656,7 +2705,148 @@ export default function Home() {
                 )}
               </div>
             </div>
-          )}
+
+            {/* CUSTOM QUESTION TEST MODAL */}
+            {showTestMsgModal && (
+              <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <div className="bg-gradient-to-r from-purple-600 to-indigo-600 px-6 py-4 text-white flex items-center justify-between">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="p-2 bg-white/10 rounded-lg">
+                        <Sparkles className="w-5 h-5 text-purple-200" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm">Test Gemini AI Customer Concierge</h3>
+                        <p className="text-[11px] text-purple-100">
+                          Apna custom sawaal likhkar test karein ki Gemini kaisa response generate karta hai
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowTestMsgModal(false)}
+                      className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSimulateCustomMessage} className="p-6 space-y-4">
+                    {/* Listing Selector */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Associated eBay Listing (Product Context)
+                      </label>
+                      <select
+                        value={testMsgListingId}
+                        onChange={(e) => setTestMsgListingId(e.target.value)}
+                        className="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        {listings.length === 0 ? (
+                          <option value="">Default: 2.00 ct Round Lab Grown Diamond Ring Set</option>
+                        ) : (
+                          listings.map((l) => (
+                            <option key={l.id || l.ebayListingId} value={l.id || l.ebayListingId}>
+                              {l.sku ? `[${l.sku}] ` : ''}{l.title.slice(0, 60)}... ({l.price ? `$${l.price.toFixed(2)}` : 'N/A'})
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Gemini is listing ke Item Specifics (Carat, Metal, Clarity, Ring Size) padhkar accurate answer dega.
+                      </p>
+                    </div>
+
+                    {/* Buyer Name */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Buyer Name (Simulated)
+                      </label>
+                      <input
+                        type="text"
+                        value={testMsgBuyerName}
+                        onChange={(e) => setTestMsgBuyerName(e.target.value)}
+                        placeholder="e.g. Jessica Miller"
+                        className="w-full border border-slate-300 rounded-lg p-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    {/* Question Textarea */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-semibold text-slate-700">
+                          Buyer Question / Inquiry (Aapka Sawaal)
+                        </label>
+                        <span className="text-[10px] text-purple-600 font-medium">Type any question</span>
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={testMsgQuestion}
+                        onChange={(e) => setTestMsgQuestion(e.target.value)}
+                        placeholder="e.g. Hi, can you make this in US ring size 8.5? What is dispatch time? Or can you give 15% discount?"
+                        className="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 font-sans"
+                        autoFocus
+                      />
+                    </div>
+
+                    {/* Quick Sample Questions */}
+                    <div>
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block mb-1.5">
+                        Quick Sample Questions (Click to insert):
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          'Hi, can you make this in US ring size 8.5? How long will dispatch take?',
+                          'Will you take $250 for this right now? Can you give discount?',
+                          'Is this solid gold or plated? Does it come with an authentic IGI certificate?',
+                          'I need this for anniversary next week, do you offer express expedited delivery?',
+                          'Can you cast this in 14k White Gold instead of Yellow Gold?',
+                          '?',
+                        ].map((sample, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setTestMsgQuestion(sample)}
+                            className="text-[10px] bg-slate-100 hover:bg-purple-50 hover:text-purple-700 hover:border-purple-300 border border-slate-200 px-2 py-1 rounded-md text-slate-700 transition text-left cursor-pointer"
+                          >
+                            {sample.length > 36 ? sample.slice(0, 36) + '...' : sample}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowTestMsgModal(false)}
+                        className="px-3.5 py-2 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSimulatingMessage || !testMsgQuestion.trim()}
+                        className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-40 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition cursor-pointer"
+                      >
+                        {isSimulatingMessage ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Generating AI Reply...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Simulate & Generate AI Reply</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </>)}
 
           {/* TAB 5: CONNECTED STORES (SELLBRITE MULTI-TENANT VIEW) */}
           {activeTab === 'stores' && (

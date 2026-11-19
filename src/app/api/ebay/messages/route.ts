@@ -13,6 +13,7 @@ import {
   getAccountForEnvironment,
 } from '@/lib/ebay/server-store';
 import { syncLiveEbayMessages, sendLiveEbayReply } from '@/lib/ebay/live-sync';
+import { generateAiCustomerReply } from '@/lib/ebay/gemini-ai';
 
 export async function GET(request: Request) {
   try {
@@ -110,30 +111,78 @@ export async function POST(request: Request) {
 
       const chosen = sampleQueries[Math.floor(Math.random() * sampleQueries.length)];
       const userListings = store.listings.filter((l) => l.accountId === targetAccountId || !targetAccountId);
-      const matchedListing = userListings.length > 0 ? userListings[Math.floor(Math.random() * userListings.length)] : null;
+      
+      let matchedListing = null;
+      if (body.listingId) {
+        matchedListing = store.listings.find((l) => l.id === body.listingId || l.ebayListingId === body.listingId) || null;
+      }
+      if (!matchedListing && userListings.length > 0) {
+        matchedListing = userListings[Math.floor(Math.random() * userListings.length)];
+      }
+
+      const finalBuyerUsername = (body.buyerUsername || chosen.buyerUsername).trim();
+      const finalBuyerName = (body.buyerName || chosen.buyerName).trim();
+      const finalMessage = (body.question || body.message || chosen.message).trim();
+      const finalSubject = (body.subject || (finalMessage.slice(0, 40) + '...')).trim();
 
       const newThreadId = `thr-${Date.now()}`;
-      const newThread = {
+      const newThread: any = {
         id: newThreadId,
         accountId: account?.id || targetAccountId,
-        buyerUsername: chosen.buyerUsername,
-        buyerName: chosen.buyerName,
+        buyerUsername: finalBuyerUsername,
+        buyerName: finalBuyerName,
         itemTitle: matchedListing ? matchedListing.title : chosen.itemTitle,
         listingId: matchedListing ? matchedListing.id : undefined,
-        subject: chosen.subject,
-        lastMessageSnippet: chosen.message,
+        subject: finalSubject,
+        lastMessageSnippet: finalMessage,
         lastUpdated: new Date().toISOString(),
         unread: true,
         messages: [
           {
             id: `msg-${Date.now()}`,
-            sender: chosen.buyerUsername,
+            sender: finalBuyerUsername,
             senderRole: 'BUYER' as const,
             timestamp: new Date().toISOString(),
-            body: chosen.message,
+            body: finalMessage,
           },
         ],
       };
+
+      // If Gemini AI is configured, generate draft response immediately
+      const geminiKey = store.masterConfig?.geminiApiKey || process.env.GEMINI_API_KEY;
+      if (geminiKey) {
+        try {
+          const aiDraft = await generateAiCustomerReply({
+            geminiApiKey: geminiKey,
+            storeName: account?.storeName || 'Livuniq',
+            buyerName: finalBuyerName,
+            buyerUsername: finalBuyerUsername,
+            incomingMessage: finalMessage,
+            chatHistory: newThread.messages,
+            listing: matchedListing,
+            customInstructions: store.masterConfig?.aiCustomInstructions,
+          });
+
+          if (aiDraft) {
+            if (store.masterConfig?.aiAutoReplyMode === 'auto') {
+              newThread.messages.push({
+                id: `msg-${Date.now() + 1}`,
+                sender: account?.storeName || 'Livuniq',
+                senderRole: 'SELLER',
+                timestamp: new Date().toISOString(),
+                body: aiDraft,
+                isAiGenerated: true,
+              });
+              newThread.lastMessageSnippet = aiDraft;
+              newThread.aiAutoRepliedAt = new Date().toISOString();
+            } else {
+              newThread.aiDraftReply = aiDraft;
+            }
+          }
+        } catch (aiErr) {
+          console.error('[Simulate] AI draft generation error:', aiErr);
+        }
+      }
 
       store.threads.unshift(newThread);
       await saveStoreAsync(store);

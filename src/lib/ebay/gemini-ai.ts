@@ -62,15 +62,16 @@ export async function resolveWorkingGeminiEndpoint(apiKey: string): Promise<{
     }
   }
 
-  // Preference ranking: fast flash models > latest > pro > general
+  // Preference ranking: fast flash-lite / flash models > latest > pro > general
   const priorityList = [
+    'gemini-flash-lite-latest',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
+    'gemini-2.5-flash',
     'gemini-1.5-flash',
-    'gemini-1.5-flash-latest',
     'gemini-2.0-flash',
-    'gemini-2.0-flash-exp',
-    'gemini-1.5-flash-8b',
-    'gemini-1.5-pro',
-    'gemini-1.5-pro-latest',
+    'gemini-pro-latest',
     'gemini-pro',
   ];
 
@@ -271,12 +272,17 @@ Output ONLY the final response message text to be sent to the buyer.`;
     }
 
     const data = await res.json();
-    const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!candidateText || typeof candidateText !== 'string') {
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const textPieces = parts
+      .map((p: any) => (typeof p.text === 'string' ? p.text : ''))
+      .filter(Boolean);
+    const candidateText = textPieces.join('').trim();
+    if (!candidateText) {
+      console.error('[Gemini AI] No text parts in response:', JSON.stringify(data));
       return null;
     }
 
-    return candidateText.trim();
+    return candidateText;
   } catch (err) {
     console.error('[Gemini AI] Generation failed:', err);
     return null;
