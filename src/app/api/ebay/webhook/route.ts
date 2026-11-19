@@ -200,7 +200,9 @@ export async function POST(request: Request) {
         };
 
         if (existingThread) {
-          const isDup = existingThread.messages.some((m) => m.id === newMsg.id || m.body === newMsg.body);
+          const isDup = existingThread.messages.some(
+            (m) => (newMsg.id && m.id === newMsg.id) || (m.timestamp === newMsg.timestamp && m.body === newMsg.body)
+          );
           if (!isDup) {
             existingThread.messages.push(newMsg);
             existingThread.lastMessageSnippet = messageBody.slice(0, 120);

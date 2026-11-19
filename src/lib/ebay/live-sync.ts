@@ -1596,7 +1596,7 @@ export function parseChatHistoryFromEbayText(
   let turnIndex = 0;
   for (const part of rawParts) {
     const trimmed = part.trim();
-    if (!trimmed || trimmed.length < 2 || isJunkMessageOrCss(trimmed)) continue;
+    if (!trimmed || isJunkMessageOrCss(trimmed)) continue;
 
     let sender = buyerUsername;
     let senderRole: 'BUYER' | 'SELLER' = 'BUYER';
@@ -1644,7 +1644,7 @@ export function parseChatHistoryFromEbayText(
       .replace(/Item Number:\s*[^\r\n<]+/gi, '')
       .trim();
 
-    if (turnBody && turnBody.length > 1 && !isJunkMessageOrCss(turnBody)) {
+    if (turnBody && !isJunkMessageOrCss(turnBody)) {
       parsedMsgs.push({
         id: `msg-${messageId}-${turnIndex}`,
         sender,
@@ -1673,20 +1673,25 @@ export function parseChatHistoryFromEbayText(
     : [];
 }
 
-// Helper: Safely merge conversation messages without dropping past replies, stripping CSS junk
+// Helper: Safely merge conversation messages using unique ID & timestamp so repeated words (e.g. "?", "hello", "hi") are never dropped
 function mergeThreadMessages(existing: EbayMessage[], incoming: EbayMessage[]): EbayMessage[] {
   const map = new Map<string, EbayMessage>();
-  const norm = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+  const getMsgKey = (m: EbayMessage) => {
+    if (m.id && !m.id.startsWith('msg-test-')) {
+      return `${m.senderRole}-${m.id}`;
+    }
+    return `${m.senderRole}-${m.timestamp}-${m.body.trim()}`;
+  };
 
   for (const m of existing) {
     if (isJunkMessageOrCss(m.body)) continue;
-    const key = `${m.senderRole}-${norm(m.body)}`;
-    map.set(key, m);
+    map.set(getMsgKey(m), m);
   }
 
   for (const m of incoming) {
     if (isJunkMessageOrCss(m.body)) continue;
-    const key = `${m.senderRole}-${norm(m.body)}`;
+    const key = getMsgKey(m);
     if (!map.has(key)) {
       map.set(key, m);
     }
