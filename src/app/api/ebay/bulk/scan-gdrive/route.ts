@@ -30,6 +30,9 @@ export async function POST(request: Request) {
     }
 
     let detectedGroups: DriveSkuGroup[] = [];
+    let detectedExcel: any = null;
+    let totalScannedFiles = 0;
+    let totalSubfoldersCount = 0;
     let scanError = '';
 
     // 1. If user supplied a Google Drive Folder Link and API Key
@@ -50,7 +53,7 @@ export async function POST(request: Request) {
         });
       }
 
-      const scanResult = await scanGoogleDriveViaApi(folderId, apiKey);
+      const scanResult = await scanGoogleDriveViaApi(folderId, apiKey, { parseExcel: true });
       if (!scanResult.success) {
         let userFriendlyError = scanResult.error || 'Google Drive folder scan failed.';
         if (userFriendlyError.includes('404') || userFriendlyError.toLowerCase().includes('not found')) {
@@ -63,9 +66,14 @@ export async function POST(request: Request) {
       }
 
       detectedGroups = scanResult.groups;
+      detectedExcel = scanResult.excelFile || null;
+      totalScannedFiles = scanResult.totalFiles;
+      totalSubfoldersCount = scanResult.totalSubfolders;
     } else if (rawList) {
       // 2. If user pasted raw text / list of Drive links mapped to SKUs
       detectedGroups = parseRawDriveLinksList(rawList);
+      totalScannedFiles = detectedGroups.reduce((acc, g) => acc + g.fileCount, 0);
+      totalSubfoldersCount = detectedGroups.length;
     } else {
       return NextResponse.json(
         { success: false, error: 'Please provide either a Google Drive folder link or a list of SKU-mapped Drive links.' },
@@ -73,10 +81,10 @@ export async function POST(request: Request) {
       );
     }
 
-    if (detectedGroups.length === 0) {
+    if (detectedGroups.length === 0 && !detectedExcel) {
       return NextResponse.json({
         success: false,
-        error: 'Koi valid images ya videos nahi mili. Please check karein ki folder public ho aur usme images/videos hon.',
+        error: 'Folder me koi Excel sheet ya SKU folders/images nahi mile. Please check karein ki folder public ho aur usme data ho.',
       });
     }
 
@@ -105,10 +113,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
+      excelFile: detectedExcel,
       groups: matchedGroups,
       matchedCount,
       unmatchedCount,
       totalGroups: matchedGroups.length,
+      totalFiles: totalScannedFiles,
+      totalSubfolders: totalSubfoldersCount,
     });
   } catch (err: any) {
     console.error('scan-gdrive error:', err);

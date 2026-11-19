@@ -27,6 +27,10 @@ import {
   Video,
   Clock,
   Calendar,
+  Cloud,
+  HardDrive,
+  ExternalLink,
+  Key,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { ConnectedAccount, EbayListing } from '@/lib/ebay/types';
@@ -327,9 +331,23 @@ export default function BulkListingModal({
   const [folderPathInput, setFolderPathInput] = useState('');
   const [stagedImages, setStagedImages] = useState<StagedImage[]>([]);
   const [stagedVideos, setStagedVideos] = useState<StagedVideo[]>([]);
-  const [imageFetchMode, setImageFetchMode] = useState<'path' | 'picker'>('picker');
+  const [imageFetchMode, setImageFetchMode] = useState<'path' | 'picker' | 'gdrive'>('picker');
   const [scanningFolder, setScanningFolder] = useState(false);
   const [uploadingBrowserImages, setUploadingBrowserImages] = useState(false);
+
+  // Google Drive Bulk Import states
+  const [importSource, setImportSource] = useState<'gdrive' | 'local'>('gdrive');
+  const [gdriveUrl, setGdriveUrl] = useState('');
+  const [gdriveApiKey, setGdriveApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [scanningGdrive, setScanningGdrive] = useState(false);
+  const [gdriveScanSummary, setGdriveScanSummary] = useState<{
+    excelName?: string;
+    itemsCount: number;
+    totalFiles: number;
+    subfoldersCount: number;
+    matchedCount: number;
+  } | null>(null);
 
   // Column & Attribute Mapping states
   const [excelHeaders, setExcelHeaders] = useState<string[]>(DEFAULT_EXCEL_HEADERS);
@@ -361,6 +379,15 @@ export default function BulkListingModal({
   const [scheduleDirectOnEbay, setScheduleDirectOnEbay] = useState<boolean>(true);
 
   useEffect(() => {
+    fetch('/api/ebay/config')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.config?.googleDriveApiKey) {
+          setGdriveApiKey(d.config.googleDriveApiKey);
+        }
+      })
+      .catch(() => {});
+
     fetch(`/api/ebay/templates?accountId=${activeAccount?.id || ''}`)
       .then((r) => r.json())
       .then((d) => {
@@ -912,6 +939,124 @@ export default function BulkListingModal({
     const rows = parseRowsWithMapping(rawJsonRows, autoColMap, autoAttrMap);
     setParsedRows(rows);
     rematchImages(rows, stagedImages);
+  };
+
+  // Scan Google Drive Folder for Excel file AND SKU photo/video folders
+  const handleScanGoogleDrive = async (overrideUrl?: string) => {
+    const targetUrl = (overrideUrl || gdriveUrl).trim();
+    if (!targetUrl) {
+      setErrorMessage('Please enter a valid Google Drive folder link.');
+      return;
+    }
+
+    setScanningGdrive(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      const res = await fetch('/api/ebay/bulk/scan-gdrive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driveUrl: targetUrl,
+          apiKey: gdriveApiKey.trim(),
+          accountId: activeAccount?.id,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        if (data.needsApiKey) {
+          setShowApiKeyInput(true);
+        }
+        setErrorMessage(data.error || 'Failed to scan Google Drive folder.');
+        return;
+      }
+
+      // 1. Process images and videos from Google Drive SKU groups
+      const photos: StagedImage[] = [];
+      const vids: StagedVideo[] = [];
+
+      (data.groups || []).forEach((g: any) => {
+        const folderName = g.folderName || g.sku;
+        (g.images || []).forEach((imgUrl: string, idx: number) => {
+          photos.push({
+            filename: `${folderName}_${idx + 1}.jpg`,
+            folderName: folderName,
+            url: imgUrl,
+          });
+        });
+
+        if (g.videoUrl) {
+          vids.push({
+            filename: `${folderName}_video.mp4`,
+            folderName: folderName,
+            url: g.videoUrl,
+          });
+        }
+      });
+
+      setStagedImages(photos);
+      setStagedVideos(vids);
+
+      // 2. If an Excel file was found and parsed inside the Google Drive folder:
+      if (data.excelFile && Array.isArray(data.excelFile.rows) && data.excelFile.rows.length > 0) {
+        const headersList: string[] = data.excelFile.headers || [];
+        const validJsonRows: any[] = data.excelFile.rows;
+        setExcelHeaders(headersList);
+        setRawJsonRows(validJsonRows);
+
+        // Auto-detect columns
+        const autoColMap: ColumnMappingConfig = {
+          priceCol: headersList.find((h) => /selling_?price/i.test(h)) || headersList.find((h) => /price/i.test(h)) || 'SELLING_PRICE_USD',
+          skuCol: headersList.find((h) => /^sku$/i.test(h)) || 'SKU',
+          categoryCol: headersList.find((h) => /^category$/i.test(h)) || 'CATEGORY',
+          quantityCol: headersList.find((h) => /^quantity$/i.test(h)) || '',
+          titleCol: headersList.find((h) => /^title$/i.test(h)) || '',
+          conditionCol: '',
+          tcwCol: 'AUTO_SUM',
+          htmlTemplateCol: headersList.find((h) => /^(html|template|html_?template|template_?name)$/i.test(h.trim())) || (headersList.includes('HTML') ? 'HTML' : ''),
+        };
+        setColumnMapping(autoColMap);
+
+        const autoAttrMap = DEFAULT_ATTRIBUTE_MAPPINGS.map((item) => {
+          const matchedHeader = headersList.find((h) => h.toLowerCase() === item.attribute.toLowerCase()) || item.column;
+          return { attribute: item.attribute, column: matchedHeader };
+        });
+        setAttributeMappings(autoAttrMap);
+
+        const rows = parseRowsWithMapping(validJsonRows, autoColMap, autoAttrMap);
+        setParsedRows(rows);
+        rematchImages(rows, photos, vids);
+
+        const matchedCount = rows.filter((r) => r.matchedImageUrls && r.matchedImageUrls.length > 0).length;
+        setGdriveScanSummary({
+          excelName: data.excelFile.name,
+          itemsCount: rows.length,
+          totalFiles: photos.length + vids.length,
+          subfoldersCount: data.totalSubfolders || data.groups.length,
+          matchedCount,
+        });
+
+        setSuccessMessage(`Google Drive scan successful! Excel '${data.excelFile.name}' se ${rows.length} listings load hue aur ${matchedCount} SKUs ki photos auto-match ho gayi.`);
+      } else {
+        // No Excel in Drive folder, match photos to existing parsedRows if any
+        if (parsedRows.length > 0) {
+          rematchImages(parsedRows, photos, vids);
+        }
+        setGdriveScanSummary({
+          itemsCount: parsedRows.length,
+          totalFiles: photos.length + vids.length,
+          subfoldersCount: data.totalSubfolders || data.groups.length,
+          matchedCount: data.matchedCount || 0,
+        });
+        setSuccessMessage(`Google Drive scan complete! ${photos.length} photos aur ${vids.length} videos load ho gayi hain.`);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error scanning Google Drive.');
+    } finally {
+      setScanningGdrive(false);
+    }
   };
 
   // 3. Scan Local Folder Path on Server
@@ -1502,6 +1647,201 @@ export default function BulkListingModal({
                 </button>
               </div>
 
+              {/* Import Source Selector */}
+              <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setImportSource('gdrive')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    importSource === 'gdrive'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <Cloud className="w-4 h-4" />
+                  <span>☁️ Google Drive (Excel + SKU Folders in 1 Link)</span>
+                  <span className="text-[10px] bg-white/20 text-white px-2 py-0.5 rounded-full font-extrabold tracking-wide uppercase">
+                    Recommended
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportSource('local')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    importSource === 'local'
+                      ? 'bg-slate-800 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <HardDrive className="w-4 h-4" />
+                  <span>💻 Local Computer (Excel File + PC Images Folder)</span>
+                </button>
+              </div>
+
+              {/* OPTION 1: GOOGLE DRIVE ALL-IN-ONE (EXCEL + SKU FOLDERS) */}
+              {importSource === 'gdrive' && (
+                <div className="bg-gradient-to-br from-blue-50/80 via-indigo-50/40 to-white border border-blue-200 rounded-2xl p-6 shadow-sm space-y-5">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-sm shrink-0">
+                        <Cloud className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                          <span>Google Drive All-in-One Bulk Import</span>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+                            Live &amp; Sandbox Supported
+                          </span>
+                        </h4>
+                        <p className="text-slate-600 text-xs mt-0.5">
+                          Google Drive parent folder ka link dalein jisme <strong>Excel sheet (.xlsx / .csv)</strong> aur <strong>sabhi SKU folders</strong> hain. Ek hi click me Excel parse ho jayegi aur sabhi SKU photos &amp; videos auto-match ho jayenge!
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="block text-xs font-bold text-slate-800">
+                      Google Drive Folder Link:
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <Cloud className="w-4 h-4 text-blue-500" />
+                        </div>
+                        <input
+                          type="text"
+                          value={gdriveUrl}
+                          onChange={(e) => setGdriveUrl(e.target.value)}
+                          placeholder="https://drive.google.com/drive/folders/1A2B3C4D5E... (Folder containing Excel & SKU image folders)"
+                          className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-2xs"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleScanGoogleDrive()}
+                        disabled={scanningGdrive || !gdriveUrl.trim()}
+                        className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                      >
+                        {scanningGdrive ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Scanning Drive...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            <span>⚡ Scan Drive &amp; Auto-Match</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Optional API key toggle */}
+                  <div className="border-t border-blue-100 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                      className="text-[11px] text-blue-700 hover:text-blue-900 font-semibold flex items-center gap-1.5"
+                    >
+                      <Key className="w-3.5 h-3.5" />
+                      <span>{showApiKeyInput ? 'Hide Google Cloud API Key' : '+ Google Cloud API Key (Configured)'}</span>
+                      {gdriveApiKey && (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
+                          ✓ Key Saved
+                        </span>
+                      )}
+                    </button>
+                    {showApiKeyInput && (
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="password"
+                          value={gdriveApiKey}
+                          onChange={(e) => setGdriveApiKey(e.target.value)}
+                          placeholder="AIzaSy..."
+                          className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scan Summary Pill / Banner */}
+                  {gdriveScanSummary && (
+                    <div className="bg-white border-2 border-emerald-400 rounded-xl p-4 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-emerald-600" />
+                          <span className="font-bold text-slate-900 text-xs">
+                            Google Drive Import Ready
+                          </span>
+                        </div>
+                        <span className="text-[11px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                          {gdriveScanSummary.matchedCount} / {gdriveScanSummary.itemsCount} SKUs Matched
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                          <div className="text-[11px] text-slate-500 font-semibold">Spreadsheet</div>
+                          <div className="font-bold text-slate-800 truncate" title={gdriveScanSummary.excelName}>
+                            📄 {gdriveScanSummary.excelName || 'data.xlsx'}
+                          </div>
+                          <div className="text-[10px] text-emerald-600 font-bold mt-0.5">
+                            {gdriveScanSummary.itemsCount} Listings Loaded
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                          <div className="text-[11px] text-slate-500 font-semibold">SKU Folders</div>
+                          <div className="font-bold text-slate-800">
+                            📁 {gdriveScanSummary.subfoldersCount} Folders
+                          </div>
+                          <div className="text-[10px] text-blue-600 font-bold mt-0.5">
+                            {gdriveScanSummary.totalFiles} Photos &amp; Videos
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                          <div className="text-[11px] text-slate-500 font-semibold">Auto-Match Status</div>
+                          <div className="font-bold text-slate-800">
+                            🎯 {gdriveScanSummary.matchedCount} Matched
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Photos auto-linked to listings
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setStep(2)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg shadow-sm flex items-center gap-1.5 transition cursor-pointer"
+                        >
+                          <span>Review Listings &amp; Pricing (Step 2)</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-blue-50/80 border border-blue-200 rounded-xl p-3.5 text-[11px] text-blue-950 flex items-start gap-2.5">
+                    <HelpCircle className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-bold">Kaise kaam karta hai? (How it works):</div>
+                      <div>
+                        1. Google Drive me ek parent folder banayein, jisme aapki <strong>Excel file</strong> (jaise <code>products.xlsx</code>) aur har SKU ke naam ka subfolder (jaise <code>P834/</code>, <code>SLR02845/</code>) ho.
+                      </div>
+                      <div>
+                        2. Google Drive folder par <strong>Right Click ➔ Share ➔ &apos;Anyone with the link&apos; (Viewer)</strong> select karein.
+                      </div>
+                      <div>
+                        3. Upar link paste karke <strong>⚡ Scan Drive</strong> par click karein. System sheet ko read karega aur SKU folders ki photos &amp; videos ko automatic har item se jod dega!
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* OPTION 2: LOCAL COMPUTER (EXCEL + FOLDER) */}
+              {importSource === 'local' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Left Card: Excel Spreadsheet */}
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
@@ -1568,19 +1908,28 @@ export default function BulkListingModal({
                       type="button"
                       onClick={() => setImageFetchMode('picker')}
                       className={`flex-1 py-1.5 rounded-md transition ${
-                        imageFetchMode === 'picker' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600'
+                        imageFetchMode === 'picker' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-600'
                       }`}
                     >
-                      Browse Folder on PC
+                      Browse on PC
                     </button>
                     <button
                       type="button"
                       onClick={() => setImageFetchMode('path')}
                       className={`flex-1 py-1.5 rounded-md transition ${
-                        imageFetchMode === 'path' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600'
+                        imageFetchMode === 'path' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-600'
                       }`}
                     >
-                      Paste Folder Path
+                      PC Path
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImageFetchMode('gdrive')}
+                      className={`flex-1 py-1.5 rounded-md transition ${
+                        imageFetchMode === 'gdrive' ? 'bg-white text-blue-700 shadow-2xs font-bold' : 'text-slate-600'
+                      }`}
+                    >
+                      ☁️ Google Drive
                     </button>
                   </div>
 
@@ -1619,7 +1968,7 @@ export default function BulkListingModal({
                         className="hidden"
                       />
                     </div>
-                  ) : (
+                  ) : imageFetchMode === 'path' ? (
                     <div className="space-y-3">
                       <p className="text-slate-500 text-xs">
                         Enter the full directory path on your PC (e.g. <code>C:\Photos\Jewelry</code>):
@@ -1643,6 +1992,30 @@ export default function BulkListingModal({
                         </button>
                       </div>
                     </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-slate-500 text-xs">
+                        Enter the Google Drive folder link containing SKU subfolders with images &amp; videos:
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={gdriveUrl}
+                          onChange={(e) => setGdriveUrl(e.target.value)}
+                          placeholder="https://drive.google.com/drive/folders/..."
+                          className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleScanGoogleDrive()}
+                          disabled={scanningGdrive || !gdriveUrl.trim()}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shrink-0"
+                        >
+                          {scanningGdrive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                          Scan Images
+                        </button>
+                      </div>
+                    </div>
                   )}
 
                   <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-[11px] text-emerald-950 leading-relaxed space-y-1">
@@ -1655,6 +2028,7 @@ export default function BulkListingModal({
                   </div>
                 </div>
               </div>
+              )}
 
               {/* INTERACTIVE COLUMN & ATTRIBUTE MAPPING SECTION */}
               <div id="column-mapping-section" className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4 scroll-mt-6">

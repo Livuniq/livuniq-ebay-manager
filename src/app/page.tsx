@@ -1319,9 +1319,10 @@ export default function Home() {
                 <button
                   onClick={() => setShowBulkModal(true)}
                   className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold shadow-sm transition cursor-pointer"
+                  title="Google Drive link ya Local Excel se sabhi SKU folders bulk me upload karein"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Bulk Listing (Excel + Photos)</span>
+                  <span>Bulk Upload (GDrive / Excel)</span>
                 </button>
 
                 <button

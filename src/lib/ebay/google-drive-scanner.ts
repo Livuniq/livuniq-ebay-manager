@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import { deduplicateImageUrls, isVideoMedia } from './template-engine';
 
 export interface DriveScannedFile {
@@ -6,6 +7,13 @@ export interface DriveScannedFile {
   url: string;
   type: 'image' | 'video';
   size?: number;
+}
+
+export interface DriveParsedExcel {
+  name: string;
+  id: string;
+  headers: string[];
+  rows: any[];
 }
 
 export interface DriveSkuGroup {
@@ -72,12 +80,140 @@ function naturalSortFiles<T extends { name: string }>(files: T[]): T[] {
 }
 
 /**
+ * Downloads and parses an Excel (.xlsx, .xls), CSV, or Google Sheet from Google Drive
+ */
+export async function downloadAndParseDriveExcel(
+  fileId: string,
+  fileName: string,
+  mimeType: string,
+  apiKey?: string
+): Promise<{ success: boolean; headers: string[]; rows: any[]; error?: string }> {
+  try {
+    const isGoogleSheet = mimeType === 'application/vnd.google-apps.spreadsheet';
+    const urlsToTry: string[] = [];
+
+    if (isGoogleSheet) {
+      if (apiKey) {
+        urlsToTry.push(
+          `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet&key=${apiKey}`
+        );
+      }
+      urlsToTry.push(`https://docs.google.com/spreadsheets/d/${fileId}/export?format=xlsx`);
+    } else {
+      if (apiKey) {
+        urlsToTry.push(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`);
+      }
+      urlsToTry.push(`https://drive.google.com/uc?export=download&id=${fileId}`);
+      urlsToTry.push(`https://drive.usercontent.google.com/download?id=${fileId}&export=download`);
+    }
+
+    let arrayBuffer: ArrayBuffer | null = null;
+    let lastError = '';
+
+    for (const url of urlsToTry) {
+      try {
+        const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+        if (res.ok) {
+          const ab = await res.arrayBuffer();
+          if (ab && ab.byteLength > 100) {
+            arrayBuffer = ab;
+            break;
+          }
+        } else {
+          lastError = `Status ${res.status}`;
+        }
+      } catch (err: any) {
+        lastError = err.message;
+      }
+    }
+
+    if (!arrayBuffer) {
+      return {
+        success: false,
+        headers: [],
+        rows: [],
+        error: `Could not download spreadsheet from Google Drive: ${lastError}`,
+      };
+    }
+
+    const buffer = Buffer.from(arrayBuffer);
+    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const sheetNames = workbook.SheetNames || [];
+    if (sheetNames.length === 0) {
+      return { success: false, headers: [], rows: [], error: 'Spreadsheet has no valid sheets.' };
+    }
+
+    // Collect rows across sheets (filtering out any non-product sheets like backend, calc, etc.)
+    let allRows: any[] = [];
+    const headersSet = new Set<string>();
+
+    for (const sName of sheetNames) {
+      const lower = sName.toLowerCase();
+      if (
+        lower === 'backend' ||
+        lower.includes('summary') ||
+        lower.includes('calc') ||
+        lower.includes('fee') ||
+        lower.includes('instruction')
+      ) {
+        continue;
+      }
+      const sheet = workbook.Sheets[sName];
+      const sheetRows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
+      if (sheetRows && sheetRows.length > 0) {
+        sheetRows.forEach((r) => {
+          if (!r['CATEGORY'] && !r['Category'] && !r['category']) {
+            r['CATEGORY'] = sName;
+          }
+          Object.keys(r).forEach((k) => headersSet.add(k.trim()));
+        });
+        allRows = [...allRows, ...sheetRows];
+      }
+    }
+
+    // Fallback: If all sheets were filtered out, use the very first sheet
+    if (allRows.length === 0 && sheetNames[0]) {
+      const firstSheet = workbook.Sheets[sheetNames[0]];
+      allRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' }) as any[];
+      allRows.forEach((r) => {
+        Object.keys(r).forEach((k) => headersSet.add(k.trim()));
+      });
+    }
+
+    const headers = Array.from(headersSet).filter(Boolean);
+
+    return {
+      success: true,
+      headers,
+      rows: allRows,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      headers: [],
+      rows: [],
+      error: `Excel parsing error: ${err.message}`,
+    };
+  }
+}
+
+/**
  * Scan a Google Drive folder using the Google Drive v3 REST API
+ * Automatically detects Excel/CSV spreadsheets AND SKU subfolders with photos/videos
  */
 export async function scanGoogleDriveViaApi(
   folderId: string,
-  apiKey: string
-): Promise<{ success: boolean; groups: DriveSkuGroup[]; totalFiles: number; error?: string }> {
+  apiKey: string,
+  options: { parseExcel?: boolean } = { parseExcel: true }
+): Promise<{
+  success: boolean;
+  excelFile?: DriveParsedExcel;
+  detectedExcels?: Array<{ id: string; name: string }>;
+  groups: DriveSkuGroup[];
+  totalFiles: number;
+  totalSubfolders: number;
+  error?: string;
+}> {
   try {
     const rootUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&key=${apiKey}&fields=files(id,name,mimeType,size)&pageSize=1000`;
     const res = await fetch(rootUrl);
@@ -91,7 +227,7 @@ export async function scanGoogleDriveViaApi(
       } catch {
         // ignore
       }
-      return { success: false, groups: [], totalFiles: 0, error: errorMsg };
+      return { success: false, groups: [], totalFiles: 0, totalSubfolders: 0, error: errorMsg };
     }
 
     const data = await res.json();
@@ -99,6 +235,38 @@ export async function scanGoogleDriveViaApi(
 
     const subfolders = rootItems.filter((f) => f.mimeType === 'application/vnd.google-apps.folder');
     const directFiles = rootItems.filter((f) => f.mimeType !== 'application/vnd.google-apps.folder');
+
+    // Detect any Excel / CSV / Google Sheet files in the root folder
+    const excelCandidates = directFiles.filter((f) => {
+      return (
+        f.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        f.mimeType === 'application/vnd.ms-excel' ||
+        f.mimeType === 'text/csv' ||
+        f.mimeType === 'application/vnd.google-apps.spreadsheet' ||
+        /\.(xlsx|xls|csv)$/i.test(f.name)
+      );
+    });
+
+    let parsedExcel: DriveParsedExcel | undefined = undefined;
+    if (options.parseExcel !== false && excelCandidates.length > 0) {
+      // Pick the primary Excel file (largest or first)
+      const primaryExcel = excelCandidates[0];
+      const parseRes = await downloadAndParseDriveExcel(
+        primaryExcel.id,
+        primaryExcel.name,
+        primaryExcel.mimeType,
+        apiKey
+      );
+
+      if (parseRes.success && parseRes.rows.length > 0) {
+        parsedExcel = {
+          id: primaryExcel.id,
+          name: primaryExcel.name,
+          headers: parseRes.headers,
+          rows: parseRes.rows,
+        };
+      }
+    }
 
     const skuMap: Record<string, { folderName: string; files: DriveScannedFile[] }> = {};
     let totalFiles = 0;
@@ -117,8 +285,32 @@ export async function scanGoogleDriveViaApi(
           const subData = await subRes.json();
           const items: Array<{ id: string; name: string; mimeType: string; size?: string }> = subData.files || [];
           for (const f of items) {
-            const isVid = f.mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi)$/i.test(f.name);
+            const isVid = f.mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi|m4v|mkv)$/i.test(f.name);
             const isImg = f.mimeType.startsWith('image/') || /\.(jpe?g|png|webp|avif|gif)$/i.test(f.name);
+
+            // Also check if an Excel was inside a subfolder
+            if (!parsedExcel && options.parseExcel !== false) {
+              const isSubExcel =
+                f.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+                f.mimeType === 'application/vnd.ms-excel' ||
+                f.mimeType === 'text/csv' ||
+                f.mimeType === 'application/vnd.google-apps.spreadsheet' ||
+                /\.(xlsx|xls|csv)$/i.test(f.name);
+
+              if (isSubExcel) {
+                const subExcelRes = await downloadAndParseDriveExcel(f.id, f.name, f.mimeType, apiKey);
+                if (subExcelRes.success && subExcelRes.rows.length > 0) {
+                  parsedExcel = {
+                    id: f.id,
+                    name: f.name,
+                    headers: subExcelRes.headers,
+                    rows: subExcelRes.rows,
+                  };
+                }
+                continue;
+              }
+            }
+
             if (!isVid && !isImg) continue;
 
             if (!skuMap[skuKey]) {
@@ -142,7 +334,7 @@ export async function scanGoogleDriveViaApi(
 
     // 2. Process Direct Files in Root Folder (Files named with SKU prefix, e.g. "SLR02845_1.jpg")
     for (const f of directFiles) {
-      const isVid = f.mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi)$/i.test(f.name);
+      const isVid = f.mimeType.startsWith('video/') || /\.(mp4|mov|webm|avi|m4v|mkv)$/i.test(f.name);
       const isImg = f.mimeType.startsWith('image/') || /\.(jpe?g|png|webp|avif|gif)$/i.test(f.name);
       if (!isVid && !isImg) continue;
 
@@ -183,11 +375,14 @@ export async function scanGoogleDriveViaApi(
 
     return {
       success: true,
+      excelFile: parsedExcel,
+      detectedExcels: excelCandidates.map((f) => ({ id: f.id, name: f.name })),
       groups,
       totalFiles,
+      totalSubfolders: subfolders.length,
     };
   } catch (err: any) {
-    return { success: false, groups: [], totalFiles: 0, error: err.message };
+    return { success: false, groups: [], totalFiles: 0, totalSubfolders: 0, error: err.message };
   }
 }
 
