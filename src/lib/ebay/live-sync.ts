@@ -775,7 +775,7 @@ export async function uploadVideoToEbayMediaApi(
 
     let videoId: string | undefined = undefined;
     let successfulBaseUrl = candidateEndpoints[0];
-    let lastCreateError = '';
+    const endpointErrors: string[] = [];
 
     for (const endpoint of candidateEndpoints) {
       try {
@@ -790,7 +790,7 @@ export async function uploadVideoToEbayMediaApi(
           body: JSON.stringify({
             title: cleanTitle,
             size: videoBuffer.length,
-            classification: ['ITEM'],
+            classification: 'ITEM',
             description: 'Product Diamond Video',
           }),
         });
@@ -806,23 +806,24 @@ export async function uploadVideoToEbayMediaApi(
           } catch {}
         }
 
-        if (createRes.status === 201 && videoId) {
+        if ((createRes.status === 201 || createRes.status === 200) && videoId) {
           successfulBaseUrl = endpoint;
           console.log(`[eBay Media API] createVideo succeeded on ${endpoint}! VideoID: ${videoId}`);
           break;
         } else {
           const errText = await createRes.text();
-          lastCreateError = `HTTP ${createRes.status}: ${errText.slice(0, 200)}`;
-          console.warn(`[eBay Media API] createVideo non-201 at ${endpoint}:`, lastCreateError);
+          const detail = `[${endpoint} -> HTTP ${createRes.status}]: ${errText}`;
+          endpointErrors.push(detail);
+          console.warn(`[eBay Media API] createVideo non-201:`, detail);
         }
       } catch (endErr: any) {
-        lastCreateError = endErr.message;
+        endpointErrors.push(`[${endpoint} -> EXCEPTION]: ${endErr.message}`);
         console.warn(`[eBay Media API] createVideo exception at ${endpoint}:`, endErr.message);
       }
     }
 
     if (!videoId) {
-      return { success: false, error: `eBay createVideo failed: ${lastCreateError || 'unreachable'}` };
+      return { success: false, error: `eBay createVideo failed: ${endpointErrors.join(' | ')}` };
     }
 
     console.log(`[eBay Media API] Uploading binary video content to eBay for videoId: ${videoId} at ${successfulBaseUrl}/${videoId}/upload`);
