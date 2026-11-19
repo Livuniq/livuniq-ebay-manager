@@ -145,6 +145,22 @@ export async function resolveWorkingGeminiEndpoint(apiKey: string): Promise<{
   };
 }
 
+function cleanHtmlDescription(html?: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<\/div>|<\/tr>|<\/p>|<br\s*\/?>|<\/li>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n')
+    .trim();
+}
+
 function extractHumanFirstName(name?: string, username?: string): string {
   if (name && name.trim()) {
     const clean = name.trim().replace(/^(mr|mrs|ms|dr)\.?\s+/i, '');
@@ -209,13 +225,16 @@ export async function generateAiCustomerReply(params: GenerateAiReplyParams): Pr
         .join('\n');
     }
 
+    const cleanedDesc = cleanHtmlDescription(listing.description);
+
     listingContext = `
-PRODUCT DETAILS (Buyer is asking about this specific eBay listing):
+FULL PRODUCT DETAILS (Deeply inspect every single detail here):
 - Title: ${listing.title}
 - Price: $${listing.price !== undefined ? listing.price.toFixed(2) : 'N/A'}
 - SKU: ${listing.sku || 'N/A'}
 - Condition: ${listing.condition || 'Brand New with tags'}
-${specsFormatted ? 'ITEM SPECIFICATIONS (Use these exact specs to answer technical questions):\n' + specsFormatted : ''}
+${specsFormatted ? 'ITEM SPECIFICATIONS TABLE:\n' + specsFormatted + '\n' : ''}
+${cleanedDesc ? 'FULL LISTING DESCRIPTION & BREAKDOWN (Contains Center Stone Weight, Side Stones, Cut, Gold, & Certificate):\n' + cleanedDesc.slice(0, 3500) + '\n' : ''}
 `;
   }
 
@@ -265,15 +284,18 @@ LATEST INCOMING BUYER MESSAGE:
 From: ${cleanFirstName} (@${buyerUsername})
 Message: "${incomingMessage}"
 
-CRITICAL GROUNDING RULES (NEVER MAKE FALSE PROMISES):
-1. CERTIFICATION / IGI:
-   - Check the ITEM SPECIFICATIONS and listing Title above carefully.
-   - ONLY mention "IGI Certificate" if the listing Title or Specifications explicitly states "IGI".
-   - If the listing specifies "Certification: Authenticate" or does not mention IGI, do NOT claim it comes with an IGI certificate. Instead, state that it comes with our studio Certificate of Authenticity verifying genuine lab-grown diamonds and solid hallmarked gold.
-2. CENTER STONE vs BAND / MULTI-STONE:
-   - If the item is a wedding band, eternity ring, or multi-stone piece (e.g. 11 stones, band) and the buyer asks about "center stone weight", clarify naturally that this is a multi-stone band with total carat weight of [TCW] (e.g. 1.21 ctw across the stones), rather than having a single center diamond.
+CRITICAL GROUNDING RULES (CHECK BOTH ITEM SPECIFICATIONS & THE FULL LISTING DESCRIPTION):
+1. CENTER STONE / MAIN STONE vs SIDE STONES vs TOTAL WEIGHT:
+   - Check the FULL LISTING DESCRIPTION and Item Specifications above!
+   - If the listing mentions "MAIN STONE Specification" or "Center Stone" (e.g. Diamond Weight: 1.50 ct or 2.00 ct), ALWAYS quote the exact center stone weight directly to the buyer! (e.g., "The center stone is a stunning 2.00 ct round diamond (with 0.42 ctw side stones for a 2.42 ctw total)!")
+   - Only if the item is purely an eternity band / wedding band with no single center stone (e.g. 11 identical stones), clarify that the total weight is [TCW] across the band.
+   - NEVER say "the center stone is part of the total weight" without quoting the actual center stone weight if it is in the description!
+2. CERTIFICATION & IGI:
+   - Check the Title, Item Specifications, and Description!
+   - If "IGI" is mentioned anywhere in the title, specifics, or description (e.g. "Certificate/Grading: IGI"), confirm: "Yes, it comes with an authentic physical IGI grading certificate card!"
+   - If IGI is NOT mentioned anywhere, state that it comes with our studio Certificate of Authenticity.
 3. SOLID GOLD vs PLATED:
-   - Look at Metal Purity in ITEM SPECIFICATIONS (e.g. 14K, 10K, 18K). Confirm directly: "It's crafted in solid [Karat] gold, never plated or filled."
+   - Check Metal Purity in ITEM SPECIFICATIONS or DESCRIPTION (e.g. 14K, 10K, 18K). Confirm directly: "It's crafted in solid [Karat] gold, never plated or filled."
 4. CUSTOM SIZING / REQUESTS:
    - Confirm free custom sizing between US 4 and 10. Tell them to simply leave a note with their size at checkout.
 5. DISCOUNTS / OFFERS:
