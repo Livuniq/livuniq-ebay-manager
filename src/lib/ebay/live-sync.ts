@@ -778,48 +778,52 @@ export async function uploadVideoToEbayMediaApi(
     const endpointErrors: string[] = [];
 
     for (const endpoint of candidateEndpoints) {
-      try {
-        console.log(`[eBay Media API] Calling createVideo at: ${endpoint}...`);
-        const createRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({
-            title: cleanTitle,
-            size: videoBuffer.length,
-            classification: 'ITEM',
-            description: 'Product Diamond Video',
-          }),
-        });
+      const payloadVariants = [
+        { title: cleanTitle, size: videoBuffer.length, classification: ['ITEM'], description: 'Product Diamond Video' },
+        { title: cleanTitle, size: videoBuffer.length, classification: 'ITEM', description: 'Product Diamond Video' },
+        { title: cleanTitle, size: videoBuffer.length, description: 'Product Diamond Video' },
+      ];
 
-        const locationHeader = createRes.headers.get('location');
-        if (locationHeader) {
-          videoId = locationHeader.split('/').pop()?.trim();
-        }
-        if (!videoId) {
-          try {
-            const createJson = await createRes.clone().json();
-            videoId = createJson.videoId || createJson.id;
-          } catch {}
-        }
+      for (const payload of payloadVariants) {
+        try {
+          console.log(`[eBay Media API] Calling createVideo at: ${endpoint} with payload:`, JSON.stringify(payload));
+          const createRes = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
 
-        if ((createRes.status === 201 || createRes.status === 200) && videoId) {
-          successfulBaseUrl = endpoint;
-          console.log(`[eBay Media API] createVideo succeeded on ${endpoint}! VideoID: ${videoId}`);
-          break;
-        } else {
-          const errText = await createRes.text();
-          const detail = `[${endpoint} -> HTTP ${createRes.status}]: ${errText}`;
-          endpointErrors.push(detail);
-          console.warn(`[eBay Media API] createVideo non-201:`, detail);
+          const locationHeader = createRes.headers.get('location');
+          if (locationHeader) {
+            videoId = locationHeader.split('/').pop()?.trim();
+          }
+          if (!videoId) {
+            try {
+              const createJson = await createRes.clone().json();
+              videoId = createJson.videoId || createJson.id;
+            } catch {}
+          }
+
+          if ((createRes.status === 201 || createRes.status === 200) && videoId) {
+            successfulBaseUrl = endpoint;
+            console.log(`[eBay Media API] createVideo succeeded on ${endpoint}! VideoID: ${videoId}`);
+            break;
+          } else {
+            const errText = await createRes.text();
+            const detail = `[${endpoint} -> HTTP ${createRes.status}]: ${errText}`;
+            endpointErrors.push(detail);
+            console.warn(`[eBay Media API] createVideo non-201:`, detail);
+          }
+        } catch (endErr: any) {
+          endpointErrors.push(`[${endpoint} -> EXCEPTION]: ${endErr.message}`);
+          console.warn(`[eBay Media API] createVideo exception at ${endpoint}:`, endErr.message);
         }
-      } catch (endErr: any) {
-        endpointErrors.push(`[${endpoint} -> EXCEPTION]: ${endErr.message}`);
-        console.warn(`[eBay Media API] createVideo exception at ${endpoint}:`, endErr.message);
       }
+      if (videoId) break;
     }
 
     if (!videoId) {
