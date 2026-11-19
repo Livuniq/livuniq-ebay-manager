@@ -118,9 +118,18 @@ export async function POST(request: Request) {
         : 0;
 
       // Filter and deduplicate only valid image URLs (strictly no videos and no duplicates)
-      const validNewImages = deduplicateImageUrls(update.images || []);
+      let validNewImages = deduplicateImageUrls(update.images || []);
 
-      if (validNewImages.length === 0) {
+      // If no new photos were provided in folder but a videoUrl is present, retain current listing photos so video can be updated!
+      if (validNewImages.length === 0 && update.videoUrl) {
+        validNewImages = listing.images && listing.images.length > 0
+          ? [...listing.images]
+          : listing.imageUrl
+          ? [listing.imageUrl]
+          : [];
+      }
+
+      if (validNewImages.length === 0 && !update.videoUrl) {
         results.push({
           listingId: listing.id,
           sku: listing.sku,
@@ -129,7 +138,7 @@ export async function POST(request: Request) {
           newImageCount: 0,
           success: false,
           pushedToEbay: false,
-          message: 'No valid image URLs provided in folder.',
+          message: 'No valid image or video URLs provided in folder.',
         });
         continue;
       }

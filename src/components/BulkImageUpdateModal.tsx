@@ -1038,13 +1038,21 @@ export default function BulkImageUpdateModal({
                               {/* Old vs New replacement badge */}
                               {isMatched && (
                                 <div className="flex items-center gap-2 mt-1.5 text-[11px] flex-wrap">
-                                  <span className="text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded font-medium">
-                                    Old: {oldImgCount} removed
-                                  </span>
-                                  <ArrowRight className="w-3 h-3 text-slate-400" />
-                                  <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
-                                    New: {group.files.length} photos ready
-                                  </span>
+                                  {group.files.length > 0 ? (
+                                    <>
+                                      <span className="text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded font-medium">
+                                        Old: {oldImgCount} replaced
+                                      </span>
+                                      <ArrowRight className="w-3 h-3 text-slate-400" />
+                                      <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded font-bold">
+                                        New: {group.files.length} photos ready
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded font-medium">
+                                      Keep existing {oldImgCount} photos
+                                    </span>
+                                  )}
                                   {group.videoUrl && (
                                     <span className="inline-flex items-center gap-1 text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded font-bold">
                                       <Video className="w-3 h-3 text-purple-600" />
