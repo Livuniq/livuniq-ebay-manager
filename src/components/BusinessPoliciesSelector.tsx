@@ -220,7 +220,7 @@ export default function BusinessPoliciesSelector({
                 type="text"
                 value={shippingPolicyId}
                 onChange={(e) => setShippingPolicyId(e.target.value)}
-                placeholder="Optional Policy ID (e.g. 6269965000)"
+                placeholder="Optional Policy ID (e.g. 243859887017)"
                 className="w-full px-2.5 py-1 border border-slate-200 rounded text-[11px] font-mono text-slate-700"
               />
             </div>
@@ -295,7 +295,7 @@ export default function BusinessPoliciesSelector({
                 type="text"
                 value={returnPolicyId}
                 onChange={(e) => setReturnPolicyId(e.target.value)}
-                placeholder="Optional Policy ID (e.g. 6269963000)"
+                placeholder="Optional Policy ID (e.g. 245514669017)"
                 className="w-full px-2.5 py-1 border border-slate-200 rounded text-[11px] font-mono text-slate-700"
               />
             </div>
@@ -370,7 +370,7 @@ export default function BusinessPoliciesSelector({
                 type="text"
                 value={paymentPolicyId}
                 onChange={(e) => setPaymentPolicyId(e.target.value)}
-                placeholder="Optional Policy ID (e.g. 6269966000)"
+                placeholder="Optional Policy ID (e.g. 243859890017)"
                 className="w-full px-2.5 py-1 border border-slate-200 rounded text-[11px] font-mono text-slate-700"
               />
             </div>

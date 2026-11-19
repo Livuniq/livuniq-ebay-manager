@@ -141,6 +141,9 @@ export async function POST(request: Request) {
         ? [listing.imageUrl]
         : [];
 
+      const oldVideoUrl = listing.videoUrl;
+      const oldVideoId = listing.videoId;
+
       listing.images = [...validNewImages];
       listing.imageUrl = validNewImages[0];
       if (update.videoUrl) {
@@ -176,14 +179,14 @@ export async function POST(request: Request) {
         try {
           // Determine video to pass to eBay:
           // If update.videoId is explicitly provided, use it.
-          // If update.videoUrl is provided without videoId (e.g. Google Drive scan):
+          // If update.videoUrl is provided without videoId or differs from old video:
           // Pass undefined so reviseLiveEbayListing will invoke uploadVideoToEbayMediaApi to upload the binary video to eBay Commerce Media API!
           let targetVideoId = update.videoId;
           if (!targetVideoId && update.videoUrl) {
-            const isUrlSame = (listing.videoUrl || '').trim() === (update.videoUrl || '').trim();
-            const hasValidEbayVideoId = listing.videoId && /^[a-f0-9]{25,45}$/i.test(listing.videoId.trim());
+            const isUrlSame = (oldVideoUrl || '').trim() === (update.videoUrl || '').trim();
+            const hasValidEbayVideoId = oldVideoId && /^[a-f0-9]{25,45}$/i.test(oldVideoId.trim());
             if (isUrlSame && hasValidEbayVideoId) {
-              targetVideoId = listing.videoId;
+              targetVideoId = oldVideoId;
             } else {
               targetVideoId = undefined; // Forces fresh upload to eBay Media API
             }

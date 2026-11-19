@@ -228,6 +228,14 @@ export async function PATCH(request: Request) {
           const store = getStore();
           const gApiKey = (store.masterConfig as any)?.googleDriveApiKey || process.env.GOOGLE_DRIVE_API_KEY;
 
+          const oldVideoUrl = (existingListing.videoUrl || '').trim();
+          const newVideoUrl = (updates.videoUrl || currentListing.videoUrl || '').trim();
+          const isNewVideo = Boolean(newVideoUrl && newVideoUrl !== oldVideoUrl);
+          // If video URL changed or if existingListing has no videoId, don't pass the stale videoId to reviseLiveEbayListing so it auto-uploads the new video!
+          const targetReviseVideoId = isNewVideo && updates.videoId === existingListing.videoId
+            ? undefined
+            : (updates.videoId || (!isNewVideo ? currentListing.videoId : undefined));
+
           const reviseResult = await reviseLiveEbayListing(account, currentListing.ebayListingId, {
             title: currentListing.title,
             price: currentListing.price,
@@ -239,8 +247,8 @@ export async function PATCH(request: Request) {
             conditionDescription: currentListing.sellerNotes,
             categoryId: currentListing.categoryId,
             conditionId: currentListing.conditionId,
-            videoId: currentListing.videoId,
-            videoUrl: currentListing.videoUrl || updates.videoUrl,
+            videoId: targetReviseVideoId,
+            videoUrl: newVideoUrl || currentListing.videoUrl,
             apiKey: gApiKey,
             shippingPolicyId: currentListing.shippingPolicyId,
             shippingPolicyName: currentListing.shippingPolicyName,
@@ -277,8 +285,8 @@ export async function PATCH(request: Request) {
               conditionDescription: currentListing.sellerNotes,
               categoryId: currentListing.categoryId,
               conditionId: currentListing.conditionId,
-              videoId: currentListing.videoId,
-              videoUrl: currentListing.videoUrl || updates.videoUrl,
+              videoId: targetReviseVideoId,
+              videoUrl: newVideoUrl || currentListing.videoUrl,
               apiKey: gApiKey,
               shippingPolicyId: currentListing.shippingPolicyId,
               shippingPolicyName: currentListing.shippingPolicyName,

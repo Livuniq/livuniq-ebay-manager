@@ -169,11 +169,18 @@ export default function EditListingModal({
       setVideoUrl(detectedVid);
       setVideoId(listing.videoId || '');
       setDescription(listing.description || '');
-      setShippingPolicyId(listing.shippingPolicyId || activeAccount?.shippingPolicyId || '6269965000');
+      const isProdMode = activeAccount?.environment === 'production';
+      const cleanPol = (p?: string) => {
+        if (!p) return '';
+        if (isProdMode && p.startsWith('626996')) return '';
+        return p;
+      };
+
+      setShippingPolicyId(cleanPol(listing.shippingPolicyId) || cleanPol(activeAccount?.shippingPolicyId) || '');
       setShippingPolicyName(listing.shippingPolicyName || activeAccount?.shippingPolicyName || '');
-      setReturnPolicyId(listing.returnPolicyId || activeAccount?.returnPolicyId || '6269963000');
+      setReturnPolicyId(cleanPol(listing.returnPolicyId) || cleanPol(activeAccount?.returnPolicyId) || '');
       setReturnPolicyName(listing.returnPolicyName || activeAccount?.returnPolicyName || '');
-      setPaymentPolicyId(listing.paymentPolicyId || activeAccount?.paymentPolicyId || '6269966000');
+      setPaymentPolicyId(cleanPol(listing.paymentPolicyId) || cleanPol(activeAccount?.paymentPolicyId) || '');
       setPaymentPolicyName(listing.paymentPolicyName || activeAccount?.paymentPolicyName || '');
       setLocationCountry(listing.locationCountry || activeAccount?.locationCountry || 'US');
       setLocationPostalCode(listing.locationPostalCode || activeAccount?.locationPostalCode || '');
@@ -349,7 +356,7 @@ export default function EditListingModal({
         data = JSON.parse(resText);
       } catch {
         if (res.status === 413 || resText.includes('Request Entity Too Large') || resText.includes('Payload Too Large')) {
-          setErrorMessage('Video size live server limit (4.5MB on Vercel) se badi hai. Dashboard me local preview ready hai! Live server ke liye please video ko localhost:3000 par upload karein (jahan 150MB support hai) ya niche direct Video URL / eBay Media ID paste karein.');
+          setErrorMessage('Local PC video upload size Vercel live server limit (4.5MB) se badi hai. Kripya niche Google Drive video link paste karein aur [⚡ Fetch & Connect to eBay] par click karein — Google Drive se bina kisi size limit ke video turant eBay par upload ho jayegi!');
           return;
         }
         throw new Error(`Server returned error (${res.status}): ${resText.slice(0, 100)}`);
@@ -381,12 +388,13 @@ export default function EditListingModal({
         body: JSON.stringify({
           videoUrl: videoUrl.trim(),
           sku: sku.trim() || listing?.sku || 'ITEM',
+          accountId: activeAccount?.id,
         }),
       });
       const data = await res.json();
       if (data.success && data.videoId) {
         setVideoId(data.videoId);
-        setSuccessMessage('Video successfully fetched from Google Drive and connected to eBay Media!');
+        setSuccessMessage(`Video successfully uploaded to eBay Media! Video ID: ${data.videoId}`);
       } else {
         setErrorMessage(data.error || 'Failed to fetch video from Google Drive');
       }
@@ -1103,8 +1111,12 @@ export default function EditListingModal({
                         type="url"
                         value={videoUrl.startsWith('blob:') ? '' : videoUrl}
                         onChange={(e) => {
-                          setVideoUrl(e.target.value.trim());
+                          const val = e.target.value.trim();
+                          setVideoUrl(val);
                           setErrorMessage('');
+                          if (val !== listing.videoUrl) {
+                            setVideoId('');
+                          }
                         }}
                         placeholder="https://drive.google.com/file/d/... or direct .mp4 link"
                         className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white"
@@ -1122,15 +1134,27 @@ export default function EditListingModal({
                           setErrorMessage('');
                         }}
                         placeholder="e.g. 50012345678 or v1|..."
-                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white"
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500 outline-none bg-white font-mono text-[11px]"
                       />
                     </div>
                   </div>
 
-                  {videoUrl && !videoId && (
+                  {videoUrl && (
                     <div className="mt-2.5 flex items-center justify-between bg-purple-50 border border-purple-200 p-2.5 rounded-lg">
                       <div className="text-[11px] text-purple-900 pr-2">
-                        <span className="font-semibold">Ready to connect:</span> Click fetch to download from Google Drive and register with eBay Media API.
+                        {videoId ? (
+                          <div>
+                            <span className="font-semibold text-emerald-700 flex items-center gap-1">
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 inline" />
+                              Video Connected on eBay:
+                            </span>
+                            <span className="font-mono text-[10px] text-slate-700 block truncate max-w-xs">{videoId}</span>
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-semibold">Ready to connect:</span> Click fetch to download directly from Google Drive and register with eBay Commerce Media API.
+                          </div>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -1141,12 +1165,12 @@ export default function EditListingModal({
                         {fetchingVideo ? (
                           <>
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Fetching & Uploading...</span>
+                            <span>Fetching & Uploading to eBay...</span>
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-3.5 h-3.5" />
-                            <span>Fetch & Connect to eBay</span>
+                            <span>{videoId ? 'Re-upload / Refresh on eBay' : 'Fetch & Connect to eBay'}</span>
                           </>
                         )}
                       </button>

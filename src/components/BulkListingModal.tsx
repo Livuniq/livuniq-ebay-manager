@@ -341,11 +341,11 @@ export default function BulkListingModal({
   const [newCustomCol, setNewCustomCol] = useState<string>('');
 
   // Step 3: Policies & Template states
-  const [shippingPolicyId, setShippingPolicyId] = useState(activeAccount?.shippingPolicyId || '6269965000');
+  const [shippingPolicyId, setShippingPolicyId] = useState(activeAccount?.shippingPolicyId || '');
   const [shippingPolicyName, setShippingPolicyName] = useState(activeAccount?.shippingPolicyName || '');
-  const [returnPolicyId, setReturnPolicyId] = useState(activeAccount?.returnPolicyId || '6269963000');
+  const [returnPolicyId, setReturnPolicyId] = useState(activeAccount?.returnPolicyId || '');
   const [returnPolicyName, setReturnPolicyName] = useState(activeAccount?.returnPolicyName || '');
-  const [paymentPolicyId, setPaymentPolicyId] = useState(activeAccount?.paymentPolicyId || '6269966000');
+  const [paymentPolicyId, setPaymentPolicyId] = useState(activeAccount?.paymentPolicyId || '');
   const [paymentPolicyName, setPaymentPolicyName] = useState(activeAccount?.paymentPolicyName || '');
 
   // Template states

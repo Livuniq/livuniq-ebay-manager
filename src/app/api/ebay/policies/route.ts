@@ -90,6 +90,42 @@ export async function GET(request: Request) {
       }
     }
 
+    // Auto-persist detected policies into account if missing or if invalid sandbox IDs are present on production
+    let didUpdateAccount = false;
+    const isSandboxEnv = isSandbox;
+    if (!isSandboxEnv && account.shippingPolicyId?.startsWith('626996')) {
+      account.shippingPolicyId = undefined;
+      account.shippingPolicyName = undefined;
+    }
+    if (!isSandboxEnv && account.returnPolicyId?.startsWith('626996')) {
+      account.returnPolicyId = undefined;
+      account.returnPolicyName = undefined;
+    }
+    if (!isSandboxEnv && account.paymentPolicyId?.startsWith('626996')) {
+      account.paymentPolicyId = undefined;
+      account.paymentPolicyName = undefined;
+    }
+
+    if (!account.shippingPolicyId && shippingPolicies[0]?.id) {
+      account.shippingPolicyId = shippingPolicies[0].id;
+      account.shippingPolicyName = shippingPolicies[0].name;
+      didUpdateAccount = true;
+    }
+    if (!account.returnPolicyId && returnPolicies[0]?.id) {
+      account.returnPolicyId = returnPolicies[0].id;
+      account.returnPolicyName = returnPolicies[0].name;
+      didUpdateAccount = true;
+    }
+    if (!account.paymentPolicyId && paymentPolicies[0]?.id) {
+      account.paymentPolicyId = paymentPolicies[0].id;
+      account.paymentPolicyName = paymentPolicies[0].name;
+      didUpdateAccount = true;
+    }
+
+    if (didUpdateAccount) {
+      await saveStoreAsync(store);
+    }
+
     return NextResponse.json({
       success: true,
       shippingPolicies,

@@ -542,15 +542,39 @@ function decodeXmlEntities(str: string): string {
     .replace(/&amp;/g, '&');
 }
 
-function normalizePolicies(input: {
-  shippingId?: string;
-  shippingName?: string;
-  returnId?: string;
-  returnName?: string;
-  paymentId?: string;
-  paymentName?: string;
-}) {
+function normalizePolicies(
+  input: {
+    shippingId?: string;
+    shippingName?: string;
+    returnId?: string;
+    returnName?: string;
+    paymentId?: string;
+    paymentName?: string;
+  },
+  isSandbox = false,
+  accountDefaults?: {
+    shippingPolicyId?: string;
+    shippingPolicyName?: string;
+    returnPolicyId?: string;
+    returnPolicyName?: string;
+    paymentPolicyId?: string;
+    paymentPolicyName?: string;
+  }
+) {
   let { shippingId, shippingName, returnId, returnName, paymentId, paymentName } = input;
+
+  // In production, reject sandbox test policy IDs (e.g. 626996...) and fall back to account defaults
+  if (!isSandbox) {
+    if (shippingId && shippingId.startsWith('626996')) {
+      shippingId = accountDefaults?.shippingPolicyId;
+    }
+    if (returnId && returnId.startsWith('626996')) {
+      returnId = accountDefaults?.returnPolicyId;
+    }
+    if (paymentId && paymentId.startsWith('626996')) {
+      paymentId = accountDefaults?.paymentPolicyId;
+    }
+  }
 
   if (shippingId && !/^\d+$/.test(shippingId.trim())) {
     if (!shippingName) shippingName = shippingId;
@@ -565,18 +589,28 @@ function normalizePolicies(input: {
     paymentId = undefined;
   }
 
-  // Known shortcuts / defaults for this store
-  if (shippingName?.trim().toLowerCase() === 's1' || (!shippingId && !shippingName)) {
-    shippingId = '6269964000';
-    shippingName = 's1';
-  }
-  if (returnName?.trim().toLowerCase() === 'r1' || (!returnId && !returnName)) {
-    returnId = '6269963000';
-    returnName = 'r1';
-  }
-  if (paymentName?.trim().toLowerCase() === 'p1' || (!paymentId && !paymentName)) {
-    paymentId = '6269962000';
-    paymentName = 'p1';
+  // Populate from account defaults if still missing
+  if (!shippingId && accountDefaults?.shippingPolicyId) shippingId = accountDefaults.shippingPolicyId;
+  if (!shippingName && accountDefaults?.shippingPolicyName) shippingName = accountDefaults.shippingPolicyName;
+  if (!returnId && accountDefaults?.returnPolicyId) returnId = accountDefaults.returnPolicyId;
+  if (!returnName && accountDefaults?.returnPolicyName) returnName = accountDefaults.returnPolicyName;
+  if (!paymentId && accountDefaults?.paymentPolicyId) paymentId = accountDefaults.paymentPolicyId;
+  if (!paymentName && accountDefaults?.paymentPolicyName) paymentName = accountDefaults.paymentPolicyName;
+
+  // Known shortcuts / defaults for SANDBOX ONLY
+  if (isSandbox) {
+    if (shippingName?.trim().toLowerCase() === 's1' || (!shippingId && !shippingName)) {
+      shippingId = '6269964000';
+      shippingName = 's1';
+    }
+    if (returnName?.trim().toLowerCase() === 'r1' || (!returnId && !returnName)) {
+      returnId = '6269963000';
+      returnName = 'r1';
+    }
+    if (paymentName?.trim().toLowerCase() === 'p1' || (!paymentId && !paymentName)) {
+      paymentId = '6269962000';
+      paymentName = 'p1';
+    }
   }
 
   return { shippingId, shippingName, returnId, returnName, paymentId, paymentName };
@@ -1033,33 +1067,53 @@ export async function reviseLiveEbayListing(
     updates.paymentPolicyId ||
     updates.paymentPolicyName
   ) {
-    const norm = normalizePolicies({
-      shippingId: updates.shippingPolicyId,
-      shippingName: updates.shippingPolicyName,
-      returnId: updates.returnPolicyId,
-      returnName: updates.returnPolicyName,
-      paymentId: updates.paymentPolicyId,
-      paymentName: updates.paymentPolicyName,
-    });
+    const isSandboxEnv = isAccountSandbox(account, masterConfig);
+    const norm = normalizePolicies(
+      {
+        shippingId: updates.shippingPolicyId,
+        shippingName: updates.shippingPolicyName,
+        returnId: updates.returnPolicyId,
+        returnName: updates.returnPolicyName,
+        paymentId: updates.paymentPolicyId,
+        paymentName: updates.paymentPolicyName,
+      },
+      isSandboxEnv,
+      {
+        shippingPolicyId: account.shippingPolicyId,
+        shippingPolicyName: account.shippingPolicyName,
+        returnPolicyId: account.returnPolicyId,
+        returnPolicyName: account.returnPolicyName,
+        paymentPolicyId: account.paymentPolicyId,
+        paymentPolicyName: account.paymentPolicyName,
+      }
+    );
 
-    let profilesXml = '<SellerProfiles>';
+    let profilesXml = '';
+    let hasValidProfile = false;
     if (norm.shippingId) {
       profilesXml += `<SellerShippingProfile><ShippingProfileID>${norm.shippingId}</ShippingProfileID></SellerShippingProfile>`;
+      hasValidProfile = true;
     } else if (norm.shippingName) {
       profilesXml += `<SellerShippingProfile><ShippingProfileName><![CDATA[${norm.shippingName}]]></ShippingProfileName></SellerShippingProfile>`;
+      hasValidProfile = true;
     }
     if (norm.returnId) {
       profilesXml += `<SellerReturnProfile><ReturnProfileID>${norm.returnId}</ReturnProfileID></SellerReturnProfile>`;
+      hasValidProfile = true;
     } else if (norm.returnName) {
       profilesXml += `<SellerReturnProfile><ReturnProfileName><![CDATA[${norm.returnName}]]></ReturnProfileName></SellerReturnProfile>`;
+      hasValidProfile = true;
     }
     if (norm.paymentId) {
       profilesXml += `<SellerPaymentProfile><PaymentProfileID>${norm.paymentId}</PaymentProfileID></SellerPaymentProfile>`;
+      hasValidProfile = true;
     } else if (norm.paymentName) {
       profilesXml += `<SellerPaymentProfile><PaymentProfileName><![CDATA[${norm.paymentName}]]></PaymentProfileName></SellerPaymentProfile>`;
+      hasValidProfile = true;
     }
-    profilesXml += '</SellerProfiles>';
-    itemXmlFields += profilesXml;
+    if (hasValidProfile) {
+      itemXmlFields += `<SellerProfiles>${profilesXml}</SellerProfiles>`;
+    }
   }
 
   // Location fields: Only revise if explicitly specified in updates (never send fallback account country during image/video updates)
@@ -1287,14 +1341,26 @@ export async function addLiveEbayListing(
     <PostalCode>${listing.locationPostalCode || account.locationPostalCode || '16701'}</PostalCode>
     ${(listing.locationCityState || account.locationCityState) ? `<Location><![CDATA[${listing.locationCityState || account.locationCityState}]]></Location>` : ''}
     ${(() => {
-      const norm = normalizePolicies({
-        shippingId: listing.shippingPolicyId || account.shippingPolicyId,
-        shippingName: listing.shippingPolicyName || account.shippingPolicyName,
-        returnId: listing.returnPolicyId || account.returnPolicyId,
-        returnName: listing.returnPolicyName || account.returnPolicyName,
-        paymentId: listing.paymentPolicyId || account.paymentPolicyId,
-        paymentName: listing.paymentPolicyName || account.paymentPolicyName,
-      });
+      const isSandboxEnv = isAccountSandbox(account, masterConfig);
+      const norm = normalizePolicies(
+        {
+          shippingId: listing.shippingPolicyId || account.shippingPolicyId,
+          shippingName: listing.shippingPolicyName || account.shippingPolicyName,
+          returnId: listing.returnPolicyId || account.returnPolicyId,
+          returnName: listing.returnPolicyName || account.returnPolicyName,
+          paymentId: listing.paymentPolicyId || account.paymentPolicyId,
+          paymentName: listing.paymentPolicyName || account.paymentPolicyName,
+        },
+        isSandboxEnv,
+        {
+          shippingPolicyId: account.shippingPolicyId,
+          shippingPolicyName: account.shippingPolicyName,
+          returnPolicyId: account.returnPolicyId,
+          returnPolicyName: account.returnPolicyName,
+          paymentPolicyId: account.paymentPolicyId,
+          paymentPolicyName: account.paymentPolicyName,
+        }
+      );
 
       const shippingTag = norm.shippingId
         ? `<ShippingProfileID>${norm.shippingId}</ShippingProfileID>`
