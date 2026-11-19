@@ -2861,8 +2861,8 @@ export default function Home() {
                         </button>
                       </div>
                       <div className="mt-2 flex items-center justify-between">
-                        <p className="text-[11px] text-slate-400">
-                          Note: Google Cloud Console me <strong>APIs & Services ➔ "Google Drive API"</strong> ko Enable karna zaroori hai.
+                        <p className="text-[11px] text-slate-500">
+                          <strong>Zaroori:</strong> Google Cloud me <strong>Google Drive API</strong> enable karein aur Drive folders ko <strong>"Anyone with the link (Viewer)"</strong> par share karein.
                         </p>
                         <button
                           type="button"
