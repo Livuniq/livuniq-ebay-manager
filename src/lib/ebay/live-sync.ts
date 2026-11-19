@@ -522,6 +522,11 @@ export async function syncLiveEbayData(account: ConnectedAccount): Promise<{
     console.error('Error syncing live eBay messages in syncLiveEbayData:', msgErr);
   }
 
+  // 6b. Automatically ensure eBay push notifications are active for this account
+  ensureAccountNotificationPreferences(account).catch((notifErr) => {
+    console.warn('[Notifications] Non-fatal notification setup notice:', notifErr);
+  });
+
   await saveStoreAsync(store);
 
   return {
@@ -2123,5 +2128,55 @@ export async function sendLiveEbayReply(
     }
   } catch (err) {
     return { success: false, message: (err as Error).message };
+  }
+}
+
+// 9. Ensure eBay Platform Notifications are active for this account
+export async function ensureAccountNotificationPreferences(account: ConnectedAccount): Promise<boolean> {
+  const store = getStore();
+  const accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
+  if (!accessToken) return false;
+
+  const tradingUrl = isAccountSandbox(account, store.masterConfig)
+    ? 'https://api.sandbox.ebay.com/ws/api.dll'
+    : 'https://api.ebay.com/ws/api.dll';
+
+  const webhookUrl = 'https://livuniq-ebay-manager.vercel.app/api/ebay/webhook';
+
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<SetNotificationPreferencesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ApplicationDeliveryPreferences>
+    <ApplicationEnable>Enable</ApplicationEnable>
+    <ApplicationURL>${webhookUrl}</ApplicationURL>
+  </ApplicationDeliveryPreferences>
+  <UserDeliveryPreferenceArray>
+    <NotificationEnable>
+      <EventType>AskSellerQuestion</EventType>
+      <EventEnable>Enable</EventEnable>
+    </NotificationEnable>
+    <NotificationEnable>
+      <EventType>FixedPriceTransaction</EventType>
+      <EventEnable>Enable</EventEnable>
+    </NotificationEnable>
+  </UserDeliveryPreferenceArray>
+</SetNotificationPreferencesRequest>`;
+
+  try {
+    const res = await fetch(tradingUrl, {
+      method: 'POST',
+      headers: {
+        'X-EBAY-API-SITEID': '0',
+        'X-EBAY-API-COMPATIBILITY-LEVEL': '1200',
+        'X-EBAY-API-CALL-NAME': 'SetNotificationPreferences',
+        'X-EBAY-API-IAF-TOKEN': accessToken,
+        'Content-Type': 'text/xml',
+      },
+      body: xml,
+    });
+    const text = await res.text();
+    return text.includes('<Ack>Success</Ack>') || text.includes('<Ack>Warning</Ack>');
+  } catch (err) {
+    console.warn('[Notifications] Could not set notification preferences:', err);
+    return false;
   }
 }
