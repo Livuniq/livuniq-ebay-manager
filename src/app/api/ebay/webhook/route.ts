@@ -7,6 +7,8 @@ import {
   getActiveAccountId,
 } from '@/lib/ebay/server-store';
 import { EbayMessageThread } from '@/lib/ebay/types';
+import { generateAiCustomerReply } from '@/lib/ebay/gemini-ai';
+import { sendLiveEbayReply } from '@/lib/ebay/live-sync';
 
 // Helper to decode XML entities
 function decodeXmlEntities(str: string): string {
@@ -229,6 +231,68 @@ export async function POST(request: Request) {
 
         await saveStoreAsync(store);
         console.log(`[eBay Webhook] Real-time message successfully saved for store: ${targetAccount.ebayUsername}`);
+
+        // 4. Gemini AI Auto-Reply or AI Draft generation if enabled
+        const geminiKey = store.masterConfig?.geminiApiKey || process.env.GEMINI_API_KEY;
+        const aiEnabled = store.masterConfig?.aiAutoReplyEnabled;
+        const activeThreadObj = existingThread || store.threads.find((t) => t.id === thrId);
+
+        if (aiEnabled && geminiKey && activeThreadObj) {
+          try {
+            const matchedListing =
+              store.listings.find((l) => l.id === activeThreadObj.listingId) ||
+              store.listings.find((l) => l.ebayListingId === activeThreadObj.listingId) ||
+              store.listings.find((l) => l.title?.toLowerCase().includes(activeThreadObj.itemTitle?.toLowerCase() || '---')) ||
+              null;
+
+            const aiReply = await generateAiCustomerReply({
+              geminiApiKey: geminiKey,
+              storeName: targetAccount.storeName || 'Livuniq',
+              buyerName: activeThreadObj.buyerName,
+              buyerUsername: activeThreadObj.buyerUsername,
+              incomingMessage: messageBody,
+              chatHistory: activeThreadObj.messages,
+              listing: matchedListing,
+              customInstructions: store.masterConfig?.aiCustomInstructions,
+            });
+
+            if (aiReply) {
+              const aiMode = store.masterConfig?.aiAutoReplyMode || 'draft';
+              if (aiMode === 'auto' && targetAccount.accessToken) {
+                // Mode AUTO: Send reply live directly to buyer on eBay!
+                const replyRes = await sendLiveEbayReply(targetAccount, {
+                  itemId: activeThreadObj.listingId,
+                  parentMessageId: `msg-${messageId}`,
+                  recipientUsername: senderId,
+                  replyText: aiReply,
+                });
+
+                if (replyRes.success) {
+                  const aiMsg = {
+                    id: `msg-ai-${Date.now()}`,
+                    sender: targetAccount.ebayUsername || 'Seller',
+                    senderRole: 'SELLER' as const,
+                    timestamp: new Date().toISOString(),
+                    body: aiReply,
+                    isAiGenerated: true,
+                  };
+                  activeThreadObj.messages.push(aiMsg);
+                  activeThreadObj.lastMessageSnippet = aiReply.slice(0, 120);
+                  activeThreadObj.lastUpdated = aiMsg.timestamp;
+                  activeThreadObj.unread = false;
+                  activeThreadObj.aiAutoRepliedAt = new Date().toISOString();
+                  delete activeThreadObj.aiDraftReply;
+                }
+              } else {
+                // Mode DRAFT: Pre-fill draft ready for 1-click seller review
+                activeThreadObj.aiDraftReply = aiReply;
+              }
+              await saveStoreAsync(store);
+            }
+          } catch (aiErr) {
+            console.error('[eBay Webhook] Error in AI auto-reply:', aiErr);
+          }
+        }
       }
     }
 

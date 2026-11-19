@@ -36,6 +36,7 @@ import {
   Eye,
   EyeOff,
   Heart,
+  Sparkles,
 } from 'lucide-react';
 import { isJunkMessageOrCss } from '@/lib/ebay/template-engine';
 import {
@@ -132,6 +133,16 @@ export default function Home() {
   const [showGdriveKey, setShowGdriveKey] = useState(false);
   const [testingGdriveKey, setTestingGdriveKey] = useState(false);
   const [gdriveKeyTestResult, setGdriveKeyTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Gemini AI Auto-Reply State
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [testingGeminiKey, setTestingGeminiKey] = useState(false);
+  const [geminiKeyTestResult, setGeminiKeyTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [aiAutoReplyEnabled, setAiAutoReplyEnabled] = useState(false);
+  const [aiAutoReplyMode, setAiAutoReplyMode] = useState<'auto' | 'draft'>('draft');
+  const [aiCustomInstructions, setAiCustomInstructions] = useState('');
+  const [isGeneratingAiReply, setIsGeneratingAiReply] = useState(false);
   const [credActiveTab, setCredActiveTab] = useState<'sandbox' | 'production'>('sandbox');
   const [connectEnv, setConnectEnv] = useState<'sandbox' | 'production'>('sandbox');
   const [masterEnv, setMasterEnv] = useState<'demo' | 'sandbox' | 'production'>('sandbox');
@@ -246,6 +257,10 @@ export default function Home() {
           productionCertId: prdCert,
           productionRuName: prdRu,
           googleDriveApiKey: gdriveKey,
+          geminiApiKey: cfgData.config.geminiApiKey || localCfg?.geminiApiKey || '',
+          aiAutoReplyEnabled: cfgData.config.aiAutoReplyEnabled !== undefined ? cfgData.config.aiAutoReplyEnabled : Boolean(localCfg?.aiAutoReplyEnabled),
+          aiAutoReplyMode: cfgData.config.aiAutoReplyMode || localCfg?.aiAutoReplyMode || 'draft',
+          aiCustomInstructions: cfgData.config.aiCustomInstructions || localCfg?.aiCustomInstructions || '',
           isLiveConfigured: Boolean((sbxApp && sbxRu) || (prdApp && prdRu) || (activeApp && activeRu)),
         };
 
@@ -260,6 +275,10 @@ export default function Home() {
         setProductionCertId(prdCert);
         setProductionRuName(prdRu);
         setGoogleDriveApiKey(gdriveKey);
+        setGeminiApiKey(cfgData.config.geminiApiKey || localCfg?.geminiApiKey || '');
+        setAiAutoReplyEnabled(cfgData.config.aiAutoReplyEnabled !== undefined ? cfgData.config.aiAutoReplyEnabled : Boolean(localCfg?.aiAutoReplyEnabled));
+        setAiAutoReplyMode(cfgData.config.aiAutoReplyMode || localCfg?.aiAutoReplyMode || 'draft');
+        setAiCustomInstructions(cfgData.config.aiCustomInstructions || localCfg?.aiCustomInstructions || '');
         setMasterEnv(finalEnv);
         setCredActiveTab(finalEnv === 'production' ? 'production' : 'sandbox');
         setConnectEnv(finalEnv === 'production' ? 'production' : 'sandbox');
@@ -859,29 +878,60 @@ export default function Home() {
     }
   };
 
-  // Send message reply
-  const handleSendReply = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedThreadId || !replyText.trim()) return;
+  // Send message reply helper
+  const handleSendReplyDirect = async (threadId: string, text: string) => {
+    if (!threadId || !text.trim()) return;
     setSendingReply(true);
     try {
       const res = await fetch('/api/ebay/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          threadId: selectedThreadId,
-          reply: replyText,
+          threadId,
+          reply: text,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        setThreads((prev) => prev.map((t) => (t.id === selectedThreadId ? data.thread : t)));
+        setThreads((prev) =>
+          prev.map((t) => (t.id === threadId ? { ...data.thread, aiDraftReply: undefined } : t))
+        );
         setReplyText('');
       }
     } catch (err) {
       console.error('Failed to send reply:', err);
     } finally {
       setSendingReply(false);
+    }
+  };
+
+  // Send message reply form
+  const handleSendReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedThreadId || !replyText.trim()) return;
+    await handleSendReplyDirect(selectedThreadId, replyText);
+  };
+
+  // Generate AI Draft Reply on demand
+  const handleGenerateAiDraft = async () => {
+    if (!selectedThreadId) return;
+    setIsGeneratingAiReply(true);
+    try {
+      const res = await fetch('/api/ebay/messages/ai-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ threadId: selectedThreadId, accountId: activeAccountId }),
+      });
+      const data = await res.json();
+      if (data.success && data.reply) {
+        setReplyText(data.reply);
+      } else {
+        alert(data.error || 'Could not generate AI reply. Check Gemini API key in Settings.');
+      }
+    } catch (err: any) {
+      alert(`Error generating AI reply: ${err.message}`);
+    } finally {
+      setIsGeneratingAiReply(false);
     }
   };
 
@@ -1142,6 +1192,10 @@ export default function Home() {
       productionCertId,
       productionRuName,
       googleDriveApiKey: googleDriveApiKey.trim(),
+      geminiApiKey: geminiApiKey.trim(),
+      aiAutoReplyEnabled,
+      aiAutoReplyMode,
+      aiCustomInstructions: aiCustomInstructions.trim(),
     };
 
     try {
@@ -1168,6 +1222,18 @@ export default function Home() {
         setProductionRuName(data.config.productionRuName || productionRuName);
         if (data.config.googleDriveApiKey !== undefined) {
           setGoogleDriveApiKey(data.config.googleDriveApiKey);
+        }
+        if (data.config.geminiApiKey !== undefined) {
+          setGeminiApiKey(data.config.geminiApiKey);
+        }
+        if (data.config.aiAutoReplyEnabled !== undefined) {
+          setAiAutoReplyEnabled(Boolean(data.config.aiAutoReplyEnabled));
+        }
+        if (data.config.aiAutoReplyMode) {
+          setAiAutoReplyMode(data.config.aiAutoReplyMode);
+        }
+        if (data.config.aiCustomInstructions !== undefined) {
+          setAiCustomInstructions(data.config.aiCustomInstructions);
         }
         if (data.activeAccountId) {
           setActiveAccountId(data.activeAccountId);
@@ -1211,6 +1277,34 @@ export default function Home() {
       setGdriveKeyTestResult({ success: false, message: `❌ Connection error: ${err.message}` });
     } finally {
       setTestingGdriveKey(false);
+    }
+  };
+
+  // Test Google Gemini API Key Validity
+  const handleTestGeminiKey = async () => {
+    const keyToTest = geminiApiKey.trim();
+    if (!keyToTest) {
+      setGeminiKeyTestResult({ success: false, message: 'Kripya pehle Google Gemini API Key enter karein.' });
+      return;
+    }
+    setTestingGeminiKey(true);
+    setGeminiKeyTestResult(null);
+    try {
+      const res = await fetch('/api/ebay/config/test-gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: keyToTest }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGeminiKeyTestResult({ success: true, message: data.message });
+      } else {
+        setGeminiKeyTestResult({ success: false, message: `❌ Error: ${data.error}` });
+      }
+    } catch (err: any) {
+      setGeminiKeyTestResult({ success: false, message: `❌ Connection error: ${err.message}` });
+    } finally {
+      setTestingGeminiKey(false);
     }
   };
 
@@ -2461,6 +2555,12 @@ export default function Home() {
                                     <span className={`font-bold ${isSeller ? 'text-blue-700' : 'text-slate-700'}`}>
                                       {isSeller ? `${msg.sender} (You)` : msg.sender}
                                     </span>
+                                    {msg.isAiGenerated && (
+                                      <span className="text-[9px] font-bold bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                        <Sparkles className="w-2.5 h-2.5" />
+                                        <span>AI Auto-Replied</span>
+                                      </span>
+                                    )}
                                     <span>•</span>
                                     <span>
                                       {new Date(msg.timestamp).toLocaleString(undefined, {
@@ -2486,6 +2586,38 @@ export default function Home() {
                           })()}
                         </div>
 
+                        {/* AI Draft Suggestion Box if available */}
+                        {activeThread.aiDraftReply && (
+                          <div className="flex-shrink-0 p-3 mx-3 mb-2 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-xl shadow-xs">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex items-center space-x-1.5">
+                                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                                <span className="text-xs font-bold text-purple-900">Gemini AI Suggested Reply</span>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setReplyText(activeThread.aiDraftReply || '')}
+                                  className="text-[11px] font-medium text-purple-700 hover:text-purple-900 bg-white hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-md transition cursor-pointer"
+                                >
+                                  Insert in Box
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendReplyDirect(activeThread.id, activeThread.aiDraftReply || '')}
+                                  className="text-[11px] font-bold text-white bg-purple-600 hover:bg-purple-700 px-3 py-1 rounded-md shadow-xs transition cursor-pointer flex items-center space-x-1"
+                                >
+                                  <Send className="w-2.5 h-2.5" />
+                                  <span>⚡ Send This Reply</span>
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-slate-700 italic bg-white/80 p-2.5 rounded-lg border border-purple-100 leading-relaxed">
+                              "{activeThread.aiDraftReply}"
+                            </p>
+                          </div>
+                        )}
+
                         {/* Permanent Sticky Reply Form at Bottom */}
                         <form onSubmit={handleSendReply} className="flex-shrink-0 p-3 bg-white border-t border-slate-200 flex gap-2 shadow-sm">
                           <input
@@ -2495,6 +2627,16 @@ export default function Home() {
                             placeholder={`Reply to ${activeThread.buyerName || activeThread.buyerUsername} as ${activeAccount?.ebayUsername}...`}
                             className="flex-1 border border-slate-300 rounded-lg px-3.5 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"
                           />
+                          <button
+                            type="button"
+                            onClick={handleGenerateAiDraft}
+                            disabled={isGeneratingAiReply || !geminiApiKey.trim()}
+                            className="bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-800 border border-purple-200 px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition cursor-pointer flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={geminiApiKey ? 'Ask Gemini AI to draft a customized reply' : 'Configure Gemini API Key in Settings first'}
+                          >
+                            <Sparkles className={`w-3.5 h-3.5 text-purple-600 ${isGeneratingAiReply ? 'animate-spin' : ''}`} />
+                            <span>{isGeneratingAiReply ? 'Drafting...' : '✨ AI Draft'}</span>
+                          </button>
                           <button
                             type="submit"
                             disabled={sendingReply || !replyText.trim()}
@@ -3051,6 +3193,225 @@ export default function Home() {
                           </div>
                         </div>
                       )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* GOOGLE GEMINI AI AUTO-REPLY & CUSTOMER ASSISTANT CARD */}
+                <div className="border border-purple-200/80 rounded-xl overflow-hidden bg-gradient-to-br from-purple-50/40 via-white to-indigo-50/30">
+                  <div className="bg-purple-100/60 px-5 py-3.5 border-b border-purple-200/80 flex items-center justify-between">
+                    <div className="flex items-center space-x-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+                        <Sparkles className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="font-bold text-slate-800 text-sm">
+                            Google Gemini AI Auto-Reply & Customer Assistant
+                          </h3>
+                          <span className="text-[10px] font-bold bg-purple-600 text-white px-2 py-0.5 rounded-full shadow-xs">
+                            Gemini 1.5 Flash
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          24/7 intelligent concierge: answers buyer questions instantly or drafts 1-click replies
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-3">
+                      {geminiApiKey ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          <Check className="w-3 h-3 mr-1" />
+                          Key Configured
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                          Key Not Set
+                        </span>
+                      )}
+
+                      {/* Enable/Disable Toggle */}
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={aiAutoReplyEnabled}
+                          onChange={(e) => setAiAutoReplyEnabled(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+                        <span className="ml-2 text-xs font-semibold text-slate-700">
+                          {aiAutoReplyEnabled ? 'Active' : 'Off'}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-lg text-slate-700 text-[11px] leading-relaxed flex items-start space-x-2.5">
+                      <Sparkles className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Smart Luxury Jewelry Concierge:</strong> Gemini AI listing ke item specifics (Carat, Metal, Ring Size, Clarity) aur store rules ko automatically padhkar polite, high-converting answers ready karta hai. Negative review risk zero karta hai.
+                      </div>
+                    </div>
+
+                    {/* Gemini API Key */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-semibold text-slate-700 text-xs">
+                          Google Gemini API Key
+                        </label>
+                        <a
+                          href="https://aistudio.google.com/app/apikey"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] text-purple-600 hover:text-purple-800 hover:underline flex items-center space-x-1 font-medium"
+                        >
+                          <span>Google AI Studio se 1-Click Free Key lein</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+                      <div className="relative flex items-center">
+                        <input
+                          type={showGeminiKey ? 'text' : 'password'}
+                          value={geminiApiKey}
+                          onChange={(e) => {
+                            setGeminiApiKey(e.target.value);
+                            setGeminiKeyTestResult(null);
+                          }}
+                          placeholder="AIzaSy... (Enter Google Gemini API Key)"
+                          className="w-full border border-purple-200 rounded-lg p-2.5 pr-12 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowGeminiKey(!showGeminiKey)}
+                          className="absolute right-2 p-1.5 text-slate-400 hover:text-slate-600 transition rounded"
+                          title={showGeminiKey ? 'Hide Key' : 'Show Key'}
+                        >
+                          {showGeminiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between">
+                        <p className="text-[11px] text-slate-500">
+                          Google AI Studio par Gemini 1.5 Flash bilkul <strong>Free</strong> hai (generous free quota).
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleTestGeminiKey}
+                          disabled={testingGeminiKey || !geminiApiKey.trim()}
+                          className="px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-800 disabled:opacity-40 rounded border border-purple-300 font-semibold text-[11px] flex items-center space-x-1 transition cursor-pointer"
+                        >
+                          {testingGeminiKey ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Testing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-3 h-3 text-purple-700" />
+                              <span>Test Gemini Key</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {geminiKeyTestResult && (
+                        <div
+                          className={`mt-2.5 p-2.5 rounded-lg text-[11px] flex items-start space-x-2 border ${
+                            geminiKeyTestResult.success
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                              : 'bg-red-50 border-red-200 text-red-900'
+                          }`}
+                        >
+                          {geminiKeyTestResult.success ? (
+                            <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1 leading-relaxed">
+                            {geminiKeyTestResult.message}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Mode Selection */}
+                    <div>
+                      <label className="block font-semibold text-slate-700 text-xs mb-2">
+                        Operation Mode
+                      </label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div
+                          onClick={() => setAiAutoReplyMode('draft')}
+                          className={`p-3.5 rounded-lg border-2 cursor-pointer transition ${
+                            aiAutoReplyMode === 'draft'
+                              ? 'border-purple-600 bg-purple-50/70 shadow-xs'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
+                              <span>✍️ AI Draft Mode</span>
+                              <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.2 rounded border border-emerald-200">
+                                Recommended
+                              </span>
+                            </span>
+                            <input
+                              type="radio"
+                              name="aiMode"
+                              checked={aiAutoReplyMode === 'draft'}
+                              onChange={() => setAiAutoReplyMode('draft')}
+                              className="text-purple-600 focus:ring-purple-500 cursor-pointer"
+                            />
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            Buyer message aane par Gemini smart suggestion draft banakar Customer Inbox me show karega. Aap review karke 1-click me Send kar sakte hain. Full control aapke paas.
+                          </p>
+                        </div>
+
+                        <div
+                          onClick={() => setAiAutoReplyMode('auto')}
+                          className={`p-3.5 rounded-lg border-2 cursor-pointer transition ${
+                            aiAutoReplyMode === 'auto'
+                              ? 'border-purple-600 bg-purple-50/70 shadow-xs'
+                              : 'border-slate-200 bg-white hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-bold text-slate-800">
+                              ⚡ Fully Autonomous Auto-Pilot
+                            </span>
+                            <input
+                              type="radio"
+                              name="aiMode"
+                              checked={aiAutoReplyMode === 'auto'}
+                              onChange={() => setAiAutoReplyMode('auto')}
+                              className="text-purple-600 focus:ring-purple-500 cursor-pointer"
+                            />
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            eBay par naya buyer message aate hi Gemini turant accurate reply banakar buyer ko direct send kar dega. 24/7 zero human delay auto-response.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Custom Store Rules & Instructions */}
+                    <div>
+                      <label className="block font-semibold text-slate-700 text-xs mb-1">
+                        Custom Store Policies & Business Rules (AI Knowledge Base)
+                      </label>
+                      <p className="text-[11px] text-slate-500 mb-2">
+                        Aapke store ke special rules (e.g. Ring resizing policy, Return window, Shipping carrier, Certificate details) jo Gemini ko har reply me dhyan me rakhne chahiye:
+                      </p>
+                      <textarea
+                        value={aiCustomInstructions}
+                        onChange={(e) => setAiCustomInstructions(e.target.value)}
+                        rows={3}
+                        placeholder="e.g. 1) Free ring resizing available from size 4 to 10 (buyer just needs to message us).&#10;2) All Lab Diamonds come with genuine IGI certification.&#10;3) Fast 2-day expedited shipping via FedEx Insured Priority.&#10;4) 30-day 100% money back hassle-free returns."
+                        className="w-full border border-purple-200 rounded-lg p-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 bg-white font-sans leading-relaxed"
+                      />
                     </div>
                   </div>
                 </div>

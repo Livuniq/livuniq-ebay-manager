@@ -67,6 +67,12 @@ export async function ensureStoreAsync(): Promise<AppStore> {
               googleDriveApiKey: process.env.GOOGLE_DRIVE_API_KEY,
             };
           }
+          if (!dbData.masterConfig?.geminiApiKey && process.env.GEMINI_API_KEY) {
+            dbData.masterConfig = {
+              ...dbData.masterConfig,
+              geminiApiKey: process.env.GEMINI_API_KEY,
+            };
+          }
           memoryStore = dbData as AppStore;
           normalizeAccountEnvironments(memoryStore);
           lastDbFetchTime = now;

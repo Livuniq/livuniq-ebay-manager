@@ -25,6 +25,9 @@ export async function GET() {
   if (!masterConfig.googleDriveApiKey && process.env.GOOGLE_DRIVE_API_KEY) {
     masterConfig.googleDriveApiKey = process.env.GOOGLE_DRIVE_API_KEY;
   }
+  if (!masterConfig.geminiApiKey && process.env.GEMINI_API_KEY) {
+    masterConfig.geminiApiKey = process.env.GEMINI_API_KEY;
+  }
   return NextResponse.json({
     success: true,
     config: masterConfig,
@@ -47,6 +50,10 @@ export async function POST(request: Request) {
       productionCertId: body.productionCertId,
       productionRuName: body.productionRuName,
       googleDriveApiKey: body.googleDriveApiKey !== undefined ? (body.googleDriveApiKey || '').trim() : undefined,
+      geminiApiKey: body.geminiApiKey !== undefined ? (body.geminiApiKey || '').trim() : undefined,
+      aiAutoReplyEnabled: body.aiAutoReplyEnabled !== undefined ? Boolean(body.aiAutoReplyEnabled) : undefined,
+      aiAutoReplyMode: body.aiAutoReplyMode || undefined,
+      aiCustomInstructions: body.aiCustomInstructions !== undefined ? body.aiCustomInstructions : undefined,
     });
     const activeAccountId = getActiveAccountId();
     const accounts = getAccounts();

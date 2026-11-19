@@ -109,6 +109,7 @@ export interface EbayMessage {
   senderRole: 'BUYER' | 'SELLER';
   timestamp: string;
   body: string;
+  isAiGenerated?: boolean;
 }
 
 export interface EbayMessageThread {
@@ -123,6 +124,8 @@ export interface EbayMessageThread {
   lastUpdated: string;
   unread: boolean;
   messages: EbayMessage[];
+  aiDraftReply?: string;
+  aiAutoRepliedAt?: string;
 }
 
 export interface MasterAppConfig {
@@ -138,4 +141,8 @@ export interface MasterAppConfig {
   productionCertId?: string;
   productionRuName?: string;
   googleDriveApiKey?: string;
+  geminiApiKey?: string;
+  aiAutoReplyEnabled?: boolean;
+  aiAutoReplyMode?: 'auto' | 'draft';
+  aiCustomInstructions?: string;
 }
