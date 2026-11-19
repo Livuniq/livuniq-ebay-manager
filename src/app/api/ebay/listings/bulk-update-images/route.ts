@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const targetAccountId = body.accountId || getActiveAccountId();
     const pushLiveToEbay = Boolean(body.pushLiveToEbay);
+    const apiKey = (body.apiKey || '').trim();
     const updates: Array<{
       listingId?: string;
       sku: string;
@@ -49,6 +50,7 @@ export async function POST(request: Request) {
       imageUrl?: string;
       videoUrl?: string;
       videoId?: string;
+      videoError?: string;
       success: boolean;
       pushedToEbay: boolean;
       message: string;
@@ -135,6 +137,7 @@ export async function POST(request: Request) {
 
       let pushedToEbay = false;
       let ebayMessage = '';
+      let videoErrorMsg: string | undefined = undefined;
 
       // 2. If pushLiveToEbay is requested and the item is live on eBay (valid numeric Item ID)
       const hasLiveEbayId = Boolean(
@@ -150,10 +153,12 @@ export async function POST(request: Request) {
             videoUrl?: string;
             videoId?: string;
             description?: string;
+            apiKey?: string;
           } = {
             images: validNewImages,
             videoUrl: update.videoUrl || listing.videoUrl,
             videoId: update.videoId || listing.videoId,
+            apiKey: apiKey || (store.masterConfig as any).googleDriveApiKey,
           };
 
           // Only send description to eBay if user opted to revise description
@@ -167,6 +172,8 @@ export async function POST(request: Request) {
             revisePayload
           );
 
+          videoErrorMsg = reviseRes.videoError;
+
           if (reviseRes.success) {
             pushedToEbay = true;
             if (reviseRes.videoId) {
@@ -177,6 +184,8 @@ export async function POST(request: Request) {
             listing.status = (listing.quantity !== undefined && listing.quantity !== null ? listing.quantity : 0) > 0 ? 'ACTIVE' : 'OUT_OF_STOCK';
             ebayMessage = reviseRes.videoId
               ? 'Live on eBay updated successfully with Video!'
+              : reviseRes.videoError
+              ? `Images updated on eBay, but video failed: ${reviseRes.videoError}`
               : 'Live on eBay updated successfully!';
           } else {
             ebayMessage = `eBay live sync failed: ${reviseRes.message}`;
@@ -197,6 +206,7 @@ export async function POST(request: Request) {
         imageUrl: listing.imageUrl,
         videoUrl: listing.videoUrl,
         videoId: listing.videoId,
+        videoError: videoErrorMsg,
         success: true,
         pushedToEbay,
         message: pushedToEbay

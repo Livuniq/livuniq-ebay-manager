@@ -456,6 +456,7 @@ export default function BulkImageUpdateModal({
           body: JSON.stringify({
             accountId: activeAccount?.id,
             pushLiveToEbay,
+            apiKey: gdriveApiKey,
             updates: [singleUpdate],
           }),
         });
@@ -1115,6 +1116,17 @@ export default function BulkImageUpdateModal({
                       <div className="text-[10px] text-slate-500 mt-0.5">
                         {res.newImageCount} new photos
                       </div>
+                      {res.videoId && (
+                        <div className="text-[10px] text-purple-700 font-semibold flex items-center justify-end gap-1 mt-0.5">
+                          <Video className="w-3 h-3 text-purple-600" />
+                          Video Attached
+                        </div>
+                      )}
+                      {res.videoError && (
+                        <div className="text-[10px] text-amber-700 font-medium mt-0.5 max-w-[200px] text-right truncate" title={res.videoError}>
+                          ⚠️ Video: {res.videoError}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}

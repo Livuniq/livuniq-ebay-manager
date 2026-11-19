@@ -1,4 +1,4 @@
-import { getStore, saveStore, saveStoreAsync } from './server-store';
+import { getStore, saveStore, saveStoreAsync, ensureStoreAsync } from './server-store';
 import { ConnectedAccount, EbayListing, EbayOrder, EbayMessageThread, EbayMessage } from './types';
 import { isEbayItemSpecific } from './specifics-rules';
 import { isVideoMedia, cleanAndDecodeDescription, sanitizeGalleryHtml, deduplicateImageUrls, isJunkMessageOrCss } from './template-engine';
@@ -579,14 +579,21 @@ function extractEbayErrorMessage(respText: string, defaultMsg = 'eBay request re
 export async function uploadVideoToEbayMediaApi(
   account: ConnectedAccount,
   videoInput: string | Buffer,
-  fileName = 'product_video.mp4'
+  fileName = 'product_video.mp4',
+  apiKey?: string
 ): Promise<{ success: boolean; videoId?: string; error?: string }> {
   try {
+    await ensureStoreAsync();
     const store = getStore();
     const accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
     if (!accessToken) {
       return { success: false, error: 'No eBay access token for active seller' };
     }
+
+    const effectiveApiKey = (apiKey || '').trim() ||
+      store.masterConfig.googleDriveApiKey ||
+      process.env.GOOGLE_DRIVE_API_KEY ||
+      '';
 
     let videoBuffer: Buffer;
     if (typeof videoInput === 'string') {
@@ -614,44 +621,116 @@ export async function uploadVideoToEbayMediaApi(
       } else {
         // Fetch remote video stream (Google Drive, Cloud Storage, etc.)
         const gDriveId = extractGoogleDriveId(cleanUrl).id;
-        const gApiKey = store.masterConfig.googleDriveApiKey || process.env.GOOGLE_DRIVE_API_KEY;
 
-        let targetFetchUrl = cleanUrl;
-        if (gDriveId && gApiKey) {
-          // Direct API download stream bypasses all Google virus scan warning pages
-          targetFetchUrl = `https://www.googleapis.com/drive/v3/files/${gDriveId}?alt=media&key=${gApiKey}`;
-        } else if (gDriveId) {
-          targetFetchUrl = `https://drive.google.com/uc?export=download&id=${gDriveId}&confirm=t`;
-        }
+        let buf: Buffer | null = null;
+        let lastError = '';
 
-        const fetchRes = await fetch(targetFetchUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          },
-        });
-        if (!fetchRes.ok) {
-          return { success: false, error: `Failed to download video from URL (HTTP ${fetchRes.status})` };
-        }
-
-        let arrayBuf = await fetchRes.arrayBuffer();
-        let buf = Buffer.from(arrayBuf);
-
-        // Check if Google Drive returned an HTML virus scan confirmation page
-        const headerSnippet = buf.slice(0, 200).toString('utf8').toLowerCase();
-        if (gDriveId && (headerSnippet.includes('<!doctype') || headerSnippet.includes('<html'))) {
-          const htmlText = buf.toString('utf8');
-          const confirmMatch = htmlText.match(/confirm=([a-zA-Z0-9_-]+)/i) || htmlText.match(/name="confirm"\s+value="([^"]+)"/i);
-          if (confirmMatch) {
-            const confirmedUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${gDriveId}`;
-            const confRes = await fetch(confirmedUrl, {
+        // Priority 1: Google Drive API alt=media download (fastest, direct binary stream, bypasses all warnings)
+        if (gDriveId && effectiveApiKey) {
+          try {
+            console.log(`[Google Drive] Downloading video via REST API with key for ID: ${gDriveId}`);
+            const apiFetchUrl = `https://www.googleapis.com/drive/v3/files/${gDriveId}?alt=media&key=${effectiveApiKey}`;
+            const apiRes = await fetch(apiFetchUrl, {
               headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
               },
             });
-            if (confRes.ok) {
-              buf = Buffer.from(await confRes.arrayBuffer());
+            if (apiRes.ok) {
+              const arrayBuf = await apiRes.arrayBuffer();
+              const candidate = Buffer.from(arrayBuf);
+              if (candidate.length > 5000) {
+                buf = candidate;
+                console.log(`[Google Drive] Video downloaded via API successfully (${buf.length} bytes)`);
+              }
+            } else {
+              const errTxt = await apiRes.text();
+              lastError = `Google API HTTP ${apiRes.status}: ${errTxt.slice(0, 100)}`;
+            }
+          } catch (apiErr: any) {
+            lastError = apiErr.message;
+          }
+        }
+
+        // Priority 2: Direct public download URL via drive.usercontent.google.com & uc?export=download
+        if (!buf && gDriveId) {
+          const directUrls = [
+            `https://drive.usercontent.google.com/download?id=${gDriveId}&export=download&confirm=t`,
+            `https://drive.google.com/uc?export=download&id=${gDriveId}&confirm=t`,
+            cleanUrl,
+          ];
+
+          for (const u of directUrls) {
+            try {
+              console.log(`[Google Drive] Attempting direct fetch from ${u.slice(0, 50)}...`);
+              const res = await fetch(u, {
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                },
+                redirect: 'follow',
+              });
+
+              if (res.ok) {
+                let candidateBuf = Buffer.from(await res.arrayBuffer());
+                const headerSnippet = candidateBuf.slice(0, 300).toString('utf8').toLowerCase();
+
+                // If Google returned HTML virus scan confirmation page, follow confirm token with cookie
+                if (headerSnippet.includes('<!doctype') || headerSnippet.includes('<html')) {
+                  const htmlText = candidateBuf.toString('utf8');
+                  const confirmMatch = htmlText.match(/confirm=([a-zA-Z0-9_-]+)/i) || htmlText.match(/name="confirm"\s+value="([^"]+)"/i);
+                  const cookies = res.headers.get('set-cookie') || '';
+                  if (confirmMatch) {
+                    const confirmedUrl = `https://drive.usercontent.google.com/download?id=${gDriveId}&export=download&confirm=${confirmMatch[1]}`;
+                    const confRes = await fetch(confirmedUrl, {
+                      headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        Cookie: cookies,
+                      },
+                    });
+                    if (confRes.ok) {
+                      candidateBuf = Buffer.from(await confRes.arrayBuffer());
+                    }
+                  }
+                }
+
+                // Verify candidate buffer is binary video and not HTML
+                const checkSnippet = candidateBuf.slice(0, 300).toString('utf8').toLowerCase();
+                if (!checkSnippet.includes('<!doctype') && !checkSnippet.includes('<html') && candidateBuf.length > 5000) {
+                  buf = candidateBuf;
+                  console.log(`[Google Drive] Video downloaded directly (${buf.length} bytes)`);
+                  break;
+                }
+              } else {
+                lastError = `HTTP ${res.status}`;
+              }
+            } catch (err: any) {
+              lastError = err.message;
             }
           }
+        }
+
+        // Priority 3: Generic remote URL (e.g. Cloudinary, S3, direct mp4 link)
+        if (!buf && !gDriveId) {
+          try {
+            const fetchRes = await fetch(cleanUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              },
+            });
+            if (fetchRes.ok) {
+              buf = Buffer.from(await fetchRes.arrayBuffer());
+            } else {
+              lastError = `HTTP ${fetchRes.status}`;
+            }
+          } catch (e: any) {
+            lastError = e.message;
+          }
+        }
+
+        if (!buf || buf.length < 5000) {
+          const errorDetail = !effectiveApiKey && gDriveId
+            ? 'Google Drive se video download nahi ho payi (Permission error). Google Drive folder par right-click ➔ Share ➔ "Anyone with the link can view" karein, ya modal me Google Cloud API Key dalein, ya direct Computer Folder use karein.'
+            : `Video download failed (${lastError || 'file unreachable'}). Check karein ki Google Drive video public accessible ho.`;
+          return { success: false, error: errorDetail };
         }
 
         videoBuffer = buf;
@@ -660,7 +739,7 @@ export async function uploadVideoToEbayMediaApi(
       videoBuffer = videoInput;
     }
 
-    if (!videoBuffer || videoBuffer.length < 500) {
+    if (!videoBuffer || videoBuffer.length < 5000) {
       return { success: false, error: 'Video buffer is empty or too small' };
     }
 
@@ -752,6 +831,7 @@ export async function reviseLiveEbayListing(
     conditionId?: string;
     videoId?: string;
     videoUrl?: string;
+    apiKey?: string;
     shippingPolicyId?: string;
     shippingPolicyName?: string;
     returnPolicyId?: string;
@@ -763,7 +843,7 @@ export async function reviseLiveEbayListing(
     locationPostalCode?: string;
     locationCityState?: string;
   }
-): Promise<{ success: boolean; message: string; videoId?: string }> {
+): Promise<{ success: boolean; message: string; videoId?: string; videoError?: string }> {
   const store = getStore();
   const accessToken = (await ensureFreshAccessToken(account)) || account.accessToken;
   const masterConfig = store.masterConfig;
@@ -871,17 +951,20 @@ export async function reviseLiveEbayListing(
     }
   }
   let effectiveVideoId = updates.videoId;
+  let videoError: string | undefined = undefined;
   if (!effectiveVideoId && updates.videoUrl) {
     try {
       console.log(`[eBay Video] Auto-uploading video from URL to eBay Media API for Item ${itemId}...`);
-      const vidRes = await uploadVideoToEbayMediaApi(account, updates.videoUrl, `video_${updates.sku || itemId}.mp4`);
+      const vidRes = await uploadVideoToEbayMediaApi(account, updates.videoUrl, `video_${updates.sku || itemId}.mp4`, updates.apiKey);
       if (vidRes.success && vidRes.videoId) {
         effectiveVideoId = vidRes.videoId;
         console.log(`[eBay Video] Video uploaded to eBay Media API successfully! VideoID: ${effectiveVideoId}`);
       } else {
+        videoError = vidRes.error || 'Video upload to eBay Media API failed';
         console.warn('[eBay Video] Auto-upload video to eBay Media API failed:', vidRes.error);
       }
-    } catch (vErr) {
+    } catch (vErr: any) {
+      videoError = vErr.message;
       console.warn('[eBay Video] Auto-upload video exception:', vErr);
     }
   }
@@ -986,10 +1069,15 @@ export async function reviseLiveEbayListing(
       respText.includes('<Ack>Warning</Ack>');
 
     if (isSuccess) {
-      return { success: true, message: 'Changes successfully published live to eBay marketplace!', videoId: effectiveVideoId };
+      const successMsg = effectiveVideoId
+        ? 'Changes and video successfully published live to eBay marketplace!'
+        : videoError
+        ? `Photos updated live, but video failed: ${videoError}`
+        : 'Changes successfully published live to eBay marketplace!';
+      return { success: true, message: successMsg, videoId: effectiveVideoId, videoError };
     } else {
       const errMsg = extractEbayErrorMessage(respText, 'eBay ReviseItem returned error');
-      return { success: false, message: errMsg };
+      return { success: false, message: errMsg, videoError };
     }
   } catch (err) {
     return { success: false, message: (err as Error).message };

@@ -222,8 +222,10 @@ export function parseRawDriveLinksList(rawText: string): DriveSkuGroup[] {
         }
 
         for (const rawUrl of urls) {
-          const isVid = isVideoMedia(rawUrl) || /\.(mp4|mov|webm)$/i.test(rawUrl);
-          const normalized = normalizeGoogleDriveUrl(rawUrl, isVid);
+          const isExplicitVideo = /(?:^video:|^vid:|\(video\)|\[video\]|video=|_video|video_)/i.test(rawUrl);
+          const cleanUrl = rawUrl.replace(/^(?:video:|vid:|video=)/i, '').replace(/\((?:video|vid)\)/i, '').trim();
+          const isVid = isExplicitVideo || isVideoMedia(cleanUrl) || /\.(mp4|mov|webm|m4v|avi|mkv)$/i.test(cleanUrl);
+          const normalized = normalizeGoogleDriveUrl(cleanUrl, isVid);
           if (isVid) {
             if (!skuMap[skuKey].videoUrl) skuMap[skuKey].videoUrl = normalized;
           } else {
@@ -233,10 +235,12 @@ export function parseRawDriveLinksList(rawText: string): DriveSkuGroup[] {
       }
     } else {
       // Just a URL line, see if we can find an ID
-      const { id } = extractGoogleDriveId(trimmed);
+      const isExplicitVideo = /(?:^video:|^vid:|\(video\)|\[video\]|video=|_video|video_)/i.test(trimmed);
+      const cleanUrl = trimmed.replace(/^(?:video:|vid:|video=)/i, '').replace(/\((?:video|vid)\)/i, '').trim();
+      const { id } = extractGoogleDriveId(cleanUrl);
       if (id) {
-        const isVid = isVideoMedia(trimmed);
-        const normalized = normalizeGoogleDriveUrl(trimmed, isVid);
+        const isVid = isExplicitVideo || isVideoMedia(cleanUrl) || /\.(mp4|mov|webm|m4v|avi|mkv)$/i.test(cleanUrl);
+        const normalized = normalizeGoogleDriveUrl(cleanUrl, isVid);
         const fallbackSku = `ITEM-${id.slice(0, 6).toUpperCase()}`;
         const skuKey = fallbackSku.toLowerCase();
         if (!skuMap[skuKey]) {
